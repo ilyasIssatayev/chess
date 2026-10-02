@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "dataset_id": "schema-example-only",
+  "sessions": [
+    {
+      "session_id": "example-session-001",
+      "partition_key": "example-game-recording-001",
+      "split": "training",
+      "media": {
+        "uri": "example-not-recording.mp4",
+        "width_px": 1920,
+        "height_px": 1080
+      },
+      "timestamp_source": "media_presentation",
+      "frames": [
+        { "frame_index": 0, "capture_us": 0 },
+        { "frame_index": 1, "capture_us": 33333 },
+        { "frame_index": 2, "capture_us": 66666 },
+        { "frame_index": 3, "capture_us": 99999 }
+      ],
+      "board": {
+        "corners": {
+          "near_left": { "x_px": 200.0, "y_px": 900.0 },
+          "near_right": { "x_px": 1700.0, "y_px": 900.0 },
+          "far_right": { "x_px": 1400.0, "y_px": 200.0 },
+          "far_left": { "x_px": 500.0, "y_px": 200.0 }
+        },
+        "orientation": "a1_near_left"
+      },
+      "reference_game": {
+        "initial_position": "startpos",
+        "moves": [
+          {
+            "ply": 1,
+            "uci": "e2e4",
+            "completion": {
+              "kind": "bounded",
+              "earliest_capture_us": 33333,
+              "latest_capture_us": 66666
+            }
+          },
+          {
+            "ply": 2,
+            "uci": "e7e5",
+            "completion": {
+              "kind": "unknown",
+              "reason": "example of a fully occluded completion"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,13 +1,52 @@
 # Chess camera recorder
 
-Planned macOS application using the built-in MacBook camera to observe a physical chess game, record moves and elapsed move times, store games locally, and provide a replay dashboard with PGN export for Chess.com.
+A local-first macOS application in progress. It uses the built-in MacBook camera to observe a physical chessboard, infer legal moves conservatively, preserve elapsed-time uncertainty, store games in SQLite, and export standard PGN for Chess.com analysis.
 
-The priority is precise move recording, with explicit review when the visual evidence is ambiguous.
+The implementation currently provides:
 
-See the [phased multi-agent development plan](docs/development-plan.md) for architecture, agent responsibilities, milestone gates, vision model candidates, timing semantics, database design, and validation targets. Its [five-hour work-frame schedule](docs/development-plan.md#five-hour-work-frames-and-development-models) gives numbered steps, checkpoints, and recommended Codex models/reasoning for each session.
+- an AVFoundation camera feasibility probe with permission, device, format, frame, and cadence reporting;
+- shared observation, move, timing, evidence, and review contracts;
+- legal UCI move application with canonical SAN/FEN through `cozy-chess`;
+- a conservative temporal decoder that compares unchanged and legal-successor positions;
+- transactional SQLite game/event/move storage;
+- PGN export with optional descriptive timing comments; and
+- session-separated evaluation manifests with leakage and annotation validation.
 
-The repository currently contains a Rust binary scaffold. Once a Rust toolchain is available:
+The built-in camera has been exercised on the target Mac, but physical chessboard placement and end-to-end vision accuracy have not been qualified. The recorder must abstain and request review when evidence is ambiguous.
+
+## Build and test
+
+With Rust 1.99 installed through rustup:
 
 ```sh
-cargo run
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo run -- demo
 ```
+
+This workspace also has an ignored, project-local toolchain under `.toolchain/`. To use it in the current checkout:
+
+```sh
+export CARGO_HOME="$PWD/.toolchain/cargo"
+export RUSTUP_HOME="$PWD/.toolchain/rustup"
+export RUSTUP_TOOLCHAIN="stable-aarch64-apple-darwin"
+export PATH="$CARGO_HOME/bin:$PATH"
+cargo test --workspace
+```
+
+## Camera probe
+
+```sh
+cargo run -p capture-probe -- permission
+cargo run -p capture-probe -- devices --json
+cargo run -p capture-probe -- formats --device 0 --json
+cargo run -p capture-probe -- sample \
+  --device 0 --frames 120 --format highest-fps --save-every 0 \
+  --output local-data/camera-probe/my-run
+```
+
+Camera samples stay under ignored `local-data/` because they may contain private room imagery. See the [camera probe guide](docs/camera-probe.md) before interpreting its process-side timestamps.
+
+## Project status and plan
+
+The [development plan](docs/development-plan.md) defines the architecture, 22 five-hour work frames, model assignments, phase gates, accuracy targets, and database/export behavior. The [work log](docs/work-log.md) records measured progress and remaining hardware dependencies. Evaluation recordings use the versioned [annotation manifest format](docs/evaluation-format.md).

@@ -1,0 +1,18 @@
+[package]
+name = "chess-evaluation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Manifest types and validation for annotated chess camera sessions"
+
+[lib]
+name = "chess_evaluation"
+path = "src/lib.rs"
+
+[[bin]]
+name = "manifest-check"
+path = "src/bin/manifest-check.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
