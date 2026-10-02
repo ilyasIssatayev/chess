@@ -255,10 +255,7 @@ mod tests {
     #[test]
     fn handles_en_passant_capture() {
         let mut game = ChessGame::standard();
-        let applied = play(
-            &mut game,
-            &["e2e4", "a7a6", "e4e5", "d7d5", "e5d6"],
-        );
+        let applied = play(&mut game, &["e2e4", "a7a6", "e4e5", "d7d5", "e5d6"]);
 
         assert_eq!(applied.last().unwrap().san, "exd6");
         assert_eq!(class_at(&game, "d6"), Some(PieceClass::WhitePawn));
@@ -319,9 +316,7 @@ mod tests {
         assert_eq!(game.fen(), before_fen);
         assert_eq!(game.history(), before_history);
 
-        assert!(game
-            .rebuild(&["e2e4".into(), "not-a-move".into()])
-            .is_err());
+        assert!(game.rebuild(&["e2e4".into(), "not-a-move".into()]).is_err());
         assert_eq!(game.fen(), before_fen);
         assert_eq!(game.history(), before_history);
     }

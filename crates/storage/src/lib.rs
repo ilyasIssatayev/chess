@@ -5,7 +5,7 @@ use chess_core::ChessGame;
 use contracts::{
     CaptureTimeUs, GameId, MoveProvenance, MoveRecord, MoveTiming, TimeBounds, TimingQuality,
 };
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -235,40 +235,180 @@ impl Store {
         game_id: GameId,
         revision: u32,
     ) -> Result<Vec<MoveRecord>, StorageError> {
-        let mut statement = self.connection.prepare(
-            "SELECT ply, uci, san, fen_before, fen_after, provenance, confidence,
-                    completion_earliest_us, completion_latest_us,
-                    elapsed_earliest_us, elapsed_latest_us, confirmation_time_us,
-                    timing_quality, evidence_json
-             FROM moves WHERE game_id = ?1 AND revision = ?2 ORDER BY ply",
-        )?;
-        let rows = statement.query_map(params![game_id.0.to_string(), revision], |row| {
-            let completion_earliest: Option<i64> = row.get(7)?;
-            let completion_latest: Option<i64> = row.get(8)?;
-            let elapsed_earliest: Option<i64> = row.get(9)?;
-            let elapsed_latest: Option<i64> = row.get(10)?;
-            Ok(RawMove {
-                ply: row.get(0)?,
-                uci: row.get(1)?,
-                san: row.get(2)?,
-                fen_before: row.get(3)?,
-                fen_after: row.get(4)?,
-                provenance: row.get(5)?,
-                confidence: row.get(6)?,
-                completion_earliest,
-                completion_latest,
-                elapsed_earliest,
-                elapsed_latest,
-                confirmation_time: row.get(11)?,
-                timing_quality: row.get(12)?,
-                evidence_json: row.get(13)?,
-            })
-        })?;
-
-        rows.map(|row| raw_to_move(game_id, revision, row?))
-            .collect()
+        load_moves_in_transaction(&self.connection, game_id, revision)
     }
 
+    pub fn replay_active_game(&self, game_id: GameId) -> Result<ReplayedGame, StorageError> {
+        let (revision, initial_fen): (u32, String) = self
+            .connection
+            .query_row(
+                "SELECT active_revision, initial_fen FROM games WHERE id = ?1",
+                params![game_id.0.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or(StorageError::GameNotFound(game_id))?;
+        let moves = self.load_moves(game_id, revision)?;
+        let mut game = ChessGame::from_fen(&initial_fen)
+            .map_err(|error| StorageError::InvalidInitialPosition(error.to_string()))?;
+        for record in &moves {
+            validate_record_against(&mut game, record, game_id, revision)?;
+        }
+        Ok(ReplayedGame {
+            revision,
+            initial_fen,
+            final_fen: game.fen(),
+            moves,
+        })
+    }
+
+    pub fn revision_history(&self, game_id: GameId) -> Result<Vec<RevisionInfo>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT revision, parent_revision, replace_from_ply, reason, created_utc_us
+             FROM game_revisions WHERE game_id = ?1 ORDER BY revision",
+        )?;
+        let rows = statement.query_map(params![game_id.0.to_string()], |row| {
+            Ok(RevisionInfo {
+                revision: row.get(0)?,
+                parent_revision: row.get(1)?,
+                replace_from_ply: row.get(2)?,
+                reason: row.get(3)?,
+                created_utc_us: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn apply_correction(
+        &mut self,
+        correction: &CorrectionRevision,
+    ) -> Result<CorrectionOutcome, StorageError> {
+        let game_id = correction.game_id.0.to_string();
+        let payload = serde_json::to_string(&(
+            correction.parent_revision,
+            correction.replace_from_ply,
+            &correction.reason,
+            &correction.replacement_suffix,
+        ))?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(i64, String, String)> = transaction
+            .query_row(
+                "SELECT sequence, event_type, payload_json FROM events
+                 WHERE game_id = ?1 AND idempotency_key = ?2",
+                params![game_id, correction.idempotency_key],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        if let Some((sequence, event_type, stored_payload)) = existing {
+            if event_type != "correction" || stored_payload != payload {
+                return Err(StorageError::IdempotencyConflict {
+                    key: correction.idempotency_key.clone(),
+                });
+            }
+            return Ok(CorrectionOutcome::AlreadyApplied {
+                revision: correction.parent_revision + 1,
+                sequence: sequence as u64,
+            });
+        }
+
+        let (active_revision, head_sequence, initial_fen): (u32, i64, String) = transaction
+            .query_row(
+                "SELECT active_revision, head_sequence, initial_fen FROM games WHERE id = ?1",
+                params![game_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?
+            .ok_or(StorageError::GameNotFound(correction.game_id))?;
+        if active_revision != correction.parent_revision {
+            return Err(StorageError::RevisionMismatch {
+                expected: active_revision,
+                actual: correction.parent_revision,
+            });
+        }
+        let parent_moves =
+            load_moves_in_transaction(&transaction, correction.game_id, active_revision)?;
+        let parent_len = parent_moves.len() as u32;
+        if correction.replace_from_ply == 0 || correction.replace_from_ply > parent_len + 1 {
+            return Err(StorageError::InvalidReplacementPly(
+                correction.replace_from_ply,
+            ));
+        }
+        let new_revision = active_revision + 1;
+        let mut game = ChessGame::from_fen(&initial_fen)
+            .map_err(|error| StorageError::InvalidInitialPosition(error.to_string()))?;
+        for record in parent_moves
+            .iter()
+            .take((correction.replace_from_ply - 1) as usize)
+        {
+            validate_record_against(&mut game, record, correction.game_id, active_revision)?;
+        }
+        for record in &correction.replacement_suffix {
+            validate_record_against(&mut game, record, correction.game_id, new_revision)?;
+        }
+
+        let sequence = head_sequence + 1;
+        transaction.execute(
+            "INSERT INTO events (
+                game_id, sequence, event_id, idempotency_key, schema_version,
+                event_type, payload_json, created_utc_us
+             ) VALUES (?1, ?2, ?3, ?4, 1, 'correction', ?5, ?6)",
+            params![
+                game_id,
+                sequence,
+                Uuid::now_v7().to_string(),
+                correction.idempotency_key,
+                payload,
+                correction.created_utc_us
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO game_revisions (
+                game_id, revision, parent_revision, replace_from_ply, reason,
+                source_event_sequence, created_utc_us
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                game_id,
+                new_revision,
+                active_revision,
+                correction.replace_from_ply,
+                correction.reason,
+                sequence,
+                correction.created_utc_us
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO moves (
+                game_id, revision, ply, uci, san, fen_before, fen_after, provenance,
+                confidence, completion_earliest_us, completion_latest_us,
+                elapsed_earliest_us, elapsed_latest_us, confirmation_time_us,
+                timing_quality, evidence_json, source_event_sequence
+             ) SELECT game_id, ?3, ply, uci, san, fen_before, fen_after, provenance,
+                confidence, completion_earliest_us, completion_latest_us,
+                elapsed_earliest_us, elapsed_latest_us, confirmation_time_us,
+                timing_quality, evidence_json, source_event_sequence
+               FROM moves WHERE game_id = ?1 AND revision = ?2 AND ply < ?4",
+            params![
+                game_id,
+                active_revision,
+                new_revision,
+                correction.replace_from_ply
+            ],
+        )?;
+        for record in &correction.replacement_suffix {
+            insert_move(&transaction, record, sequence)?;
+        }
+        transaction.execute(
+            "UPDATE games SET active_revision = ?2, head_sequence = ?3 WHERE id = ?1",
+            params![game_id, new_revision, sequence],
+        )?;
+        transaction.commit()?;
+        Ok(CorrectionOutcome::Created {
+            revision: new_revision,
+            sequence: sequence as u64,
+        })
+    }
     fn migrate(&mut self) -> Result<(), StorageError> {
         let current: i64 = self
             .connection
@@ -276,11 +416,14 @@ impl Store {
         if current > SCHEMA_VERSION {
             return Err(StorageError::NewerSchema(current));
         }
-        if current == 0 {
+        if current < SCHEMA_VERSION {
             let transaction = self
                 .connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)?;
-            transaction.execute_batch(SCHEMA_V1)?;
+            if current == 0 {
+                transaction.execute_batch(SCHEMA_V1)?;
+            }
+            transaction.execute_batch(SCHEMA_V2)?;
             transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             transaction.commit()?;
         }
@@ -295,6 +438,138 @@ fn configure(connection: &Connection, persistent: bool) -> Result<(), rusqlite::
     if persistent {
         connection.pragma_update(None, "journal_mode", "WAL")?;
     }
+    Ok(())
+}
+
+fn load_moves_in_transaction(
+    connection: &Connection,
+    game_id: GameId,
+    revision: u32,
+) -> Result<Vec<MoveRecord>, StorageError> {
+    let mut statement = connection.prepare(
+        "SELECT ply, uci, san, fen_before, fen_after, provenance, confidence,
+                completion_earliest_us, completion_latest_us,
+                elapsed_earliest_us, elapsed_latest_us, confirmation_time_us,
+                timing_quality, evidence_json
+         FROM moves WHERE game_id = ?1 AND revision = ?2 ORDER BY ply",
+    )?;
+    let rows = statement.query_map(params![game_id.0.to_string(), revision], |row| {
+        Ok(RawMove {
+            ply: row.get(0)?,
+            uci: row.get(1)?,
+            san: row.get(2)?,
+            fen_before: row.get(3)?,
+            fen_after: row.get(4)?,
+            provenance: row.get(5)?,
+            confidence: row.get(6)?,
+            completion_earliest: row.get(7)?,
+            completion_latest: row.get(8)?,
+            elapsed_earliest: row.get(9)?,
+            elapsed_latest: row.get(10)?,
+            confirmation_time: row.get(11)?,
+            timing_quality: row.get(12)?,
+            evidence_json: row.get(13)?,
+        })
+    })?;
+    rows.map(|row| raw_to_move(game_id, revision, row?))
+        .collect()
+}
+
+fn validate_appended_move(record: &MoveRecord) -> Result<(), StorageError> {
+    let mut game = ChessGame::from_fen(&record.fen_before)
+        .map_err(|error| StorageError::InvalidMove(error.to_string()))?;
+    validate_move_details(&mut game, record)
+}
+
+fn validate_record_against(
+    game: &mut ChessGame,
+    record: &MoveRecord,
+    game_id: GameId,
+    revision: u32,
+) -> Result<(), StorageError> {
+    if record.game_id != game_id || record.revision != revision {
+        return Err(StorageError::InvalidMove(
+            "game or revision mismatch".into(),
+        ));
+    }
+    let expected_ply = game.history().len() as u32 + 1;
+    if record.ply != expected_ply {
+        return Err(StorageError::PlyMismatch {
+            expected: expected_ply,
+            actual: record.ply,
+        });
+    }
+    if record.fen_before != game.fen() {
+        return Err(StorageError::DisconnectedPosition {
+            expected: game.fen(),
+            actual: record.fen_before.clone(),
+        });
+    }
+    validate_move_details(game, record)
+}
+
+fn validate_move_details(game: &mut ChessGame, record: &MoveRecord) -> Result<(), StorageError> {
+    let applied = game
+        .play_uci(&record.uci)
+        .map_err(|error| StorageError::InvalidMove(error.to_string()))?;
+    if applied.uci != record.uci
+        || applied.san != record.san
+        || applied.fen_after != record.fen_after
+    {
+        return Err(StorageError::InvalidMove(format!(
+            "canonical move, SAN, or final FEN mismatch at ply {}",
+            record.ply
+        )));
+    }
+    if record
+        .confidence
+        .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+    {
+        return Err(StorageError::InvalidMove(
+            "confidence must be between 0 and 1".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn insert_move(
+    transaction: &Transaction<'_>,
+    record: &MoveRecord,
+    sequence: i64,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "INSERT INTO moves (
+            game_id, revision, ply, uci, san, fen_before, fen_after, provenance,
+            confidence, completion_earliest_us, completion_latest_us,
+            elapsed_earliest_us, elapsed_latest_us, confirmation_time_us,
+            timing_quality, evidence_json, source_event_sequence
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        params![
+            record.game_id.0.to_string(),
+            record.revision,
+            record.ply,
+            record.uci,
+            record.san,
+            record.fen_before,
+            record.fen_after,
+            provenance_name(record.provenance),
+            record.confidence,
+            record.timing.completion.map(|bounds| bounds.earliest.get()),
+            record.timing.completion.map(|bounds| bounds.latest.get()),
+            record
+                .timing
+                .elapsed_since_previous
+                .map(|bounds| bounds.earliest.get()),
+            record
+                .timing
+                .elapsed_since_previous
+                .map(|bounds| bounds.latest.get()),
+            record.timing.confirmation_time.get(),
+            timing_quality_name(record.timing.quality),
+            serde_json::to_string(&record.evidence_ids)?,
+            sequence,
+        ],
+    )?;
     Ok(())
 }
 
@@ -433,6 +708,24 @@ CREATE TABLE moves (
 );
 "#;
 
+const SCHEMA_V2: &str = r#"
+CREATE TABLE game_revisions (
+    game_id TEXT NOT NULL REFERENCES games(id),
+    revision INTEGER NOT NULL,
+    parent_revision INTEGER,
+    replace_from_ply INTEGER,
+    reason TEXT,
+    source_event_sequence INTEGER,
+    created_utc_us INTEGER NOT NULL,
+    PRIMARY KEY (game_id, revision),
+    FOREIGN KEY (game_id, source_event_sequence) REFERENCES events(game_id, sequence)
+);
+INSERT INTO game_revisions (
+    game_id, revision, parent_revision, replace_from_ply, reason,
+    source_event_sequence, created_utc_us
+) SELECT id, 0, NULL, NULL, NULL, NULL, created_utc_us FROM games;
+"#;
+
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error(transparent)]
@@ -441,6 +734,16 @@ pub enum StorageError {
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Contract(#[from] contracts::ContractError),
+    #[error("invalid initial position: {0}")]
+    InvalidInitialPosition(String),
+    #[error("invalid move: {0}")]
+    InvalidMove(String),
+    #[error("game definition conflicts with existing game: {0:?}")]
+    GameDefinitionConflict(GameId),
+    #[error("idempotency key already used with different content: {key}")]
+    IdempotencyConflict { key: String },
+    #[error("invalid correction replacement ply: {0}")]
+    InvalidReplacementPly(u32),
     #[error("game not found: {0:?}")]
     GameNotFound(GameId),
     #[error("move revision mismatch: expected {expected}, got {actual}")]
@@ -463,14 +766,16 @@ mod tests {
     use contracts::{MoveProvenance, TimingQuality};
 
     fn record(game_id: GameId) -> MoveRecord {
+        let mut game = ChessGame::standard();
+        let applied = game.play_uci("e2e4").unwrap().clone();
         MoveRecord {
             game_id,
             revision: 0,
             ply: 1,
-            uci: "e2e4".into(),
-            san: "e4".into(),
-            fen_before: "start".into(),
-            fen_after: "after-e4".into(),
+            uci: applied.uci,
+            san: applied.san,
+            fen_before: applied.fen_before,
+            fen_after: applied.fen_after,
             provenance: MoveProvenance::Automatic,
             confidence: Some(0.999),
             timing: MoveTiming {
@@ -493,7 +798,9 @@ mod tests {
     fn appends_idempotently_and_reloads() {
         let game_id = GameId::new();
         let mut store = Store::open_in_memory().unwrap();
-        store.create_game(game_id, "start", 123).unwrap();
+        store
+            .create_game(game_id, ChessGame::standard().initial_fen(), 123)
+            .unwrap();
         let record = record(game_id);
 
         assert_eq!(
@@ -511,7 +818,9 @@ mod tests {
     fn rejects_disconnected_move_without_partial_event() {
         let game_id = GameId::new();
         let mut store = Store::open_in_memory().unwrap();
-        store.create_game(game_id, "start", 123).unwrap();
+        store
+            .create_game(game_id, ChessGame::standard().initial_fen(), 123)
+            .unwrap();
         let mut record = record(game_id);
         record.fen_before = "wrong".into();
 
@@ -526,5 +835,180 @@ mod tests {
     fn schema_is_versioned() {
         let store = Store::open_in_memory().unwrap();
         assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn correction_preserves_parent_and_replays_after_restart() {
+        let game_id = GameId::new();
+        let path = std::env::temp_dir().join(format!("chess-storage-{}.sqlite", Uuid::now_v7()));
+        let original = record(game_id);
+        let mut alternative = ChessGame::standard();
+        let applied = alternative.play_uci("d2d4").unwrap().clone();
+        let replacement = MoveRecord {
+            revision: 1,
+            uci: applied.uci,
+            san: applied.san,
+            fen_before: applied.fen_before,
+            fen_after: applied.fen_after,
+            provenance: MoveProvenance::Reviewed,
+            ..original.clone()
+        };
+        let correction = CorrectionRevision {
+            game_id,
+            parent_revision: 0,
+            idempotency_key: "review-1".into(),
+            replace_from_ply: 1,
+            reason: "visual evidence showed d4".into(),
+            replacement_suffix: vec![replacement.clone()],
+            created_utc_us: 300,
+        };
+
+        {
+            let mut store = Store::open(&path).unwrap();
+            store
+                .create_game(game_id, ChessGame::standard().initial_fen(), 100)
+                .unwrap();
+            store.append_move("capture-1", &original, 200).unwrap();
+            assert_eq!(
+                store.apply_correction(&correction).unwrap(),
+                CorrectionOutcome::Created {
+                    revision: 1,
+                    sequence: 2
+                }
+            );
+        }
+
+        {
+            let mut store = Store::open(&path).unwrap();
+            assert_eq!(store.load_moves(game_id, 0).unwrap(), vec![original]);
+            let replayed = store.replay_active_game(game_id).unwrap();
+            assert_eq!(replayed.revision, 1);
+            assert_eq!(replayed.moves, vec![replacement]);
+            assert_eq!(replayed.final_fen, alternative.fen());
+            assert_eq!(store.revision_history(game_id).unwrap().len(), 2);
+            assert_eq!(
+                store.apply_correction(&correction).unwrap(),
+                CorrectionOutcome::AlreadyApplied {
+                    revision: 1,
+                    sequence: 2
+                }
+            );
+            assert!(matches!(
+                store.append_move("capture-2", &record(game_id), 400),
+                Err(StorageError::RevisionMismatch { .. })
+            ));
+        }
+        std::fs::remove_file(&path).unwrap();
+        let _ = std::fs::remove_file(path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite-shm"));
+    }
+
+    #[test]
+    fn invalid_correction_leaves_active_revision_unchanged() {
+        let game_id = GameId::new();
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .create_game(game_id, ChessGame::standard().initial_fen(), 100)
+            .unwrap();
+        let original = record(game_id);
+        store.append_move("capture-1", &original, 200).unwrap();
+        let mut bad = original.clone();
+        bad.revision = 1;
+        bad.san = "d4".into();
+        let correction = CorrectionRevision {
+            game_id,
+            parent_revision: 0,
+            idempotency_key: "bad-review".into(),
+            replace_from_ply: 1,
+            reason: "bad test".into(),
+            replacement_suffix: vec![bad],
+            created_utc_us: 300,
+        };
+        assert!(matches!(
+            store.apply_correction(&correction),
+            Err(StorageError::InvalidMove(_))
+        ));
+        assert_eq!(store.replay_active_game(game_id).unwrap().revision, 0);
+        assert_eq!(store.revision_history(game_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn correction_copies_trusted_prefix_and_replaces_suffix() {
+        let game_id = GameId::new();
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .create_game(game_id, ChessGame::standard().initial_fen(), 100)
+            .unwrap();
+        let first = record(game_id);
+        store.append_move("capture-1", &first, 200).unwrap();
+
+        let mut game = ChessGame::standard();
+        game.play_uci("e2e4").unwrap();
+        let original_second = game.play_uci("e7e5").unwrap().clone();
+        let second = MoveRecord {
+            ply: 2,
+            uci: original_second.uci,
+            san: original_second.san,
+            fen_before: original_second.fen_before,
+            fen_after: original_second.fen_after,
+            ..first.clone()
+        };
+        store.append_move("capture-2", &second, 300).unwrap();
+
+        let mut corrected_game = ChessGame::standard();
+        corrected_game.play_uci("e2e4").unwrap();
+        let corrected_second = corrected_game.play_uci("c7c5").unwrap().clone();
+        let replacement = MoveRecord {
+            revision: 1,
+            ply: 2,
+            uci: corrected_second.uci,
+            san: corrected_second.san,
+            fen_before: corrected_second.fen_before,
+            fen_after: corrected_second.fen_after,
+            provenance: MoveProvenance::Reviewed,
+            ..first.clone()
+        };
+        store
+            .apply_correction(&CorrectionRevision {
+                game_id,
+                parent_revision: 0,
+                idempotency_key: "review-ply-2".into(),
+                replace_from_ply: 2,
+                reason: "black played c5".into(),
+                replacement_suffix: vec![replacement.clone()],
+                created_utc_us: 400,
+            })
+            .unwrap();
+
+        let replayed = store.replay_active_game(game_id).unwrap();
+        assert_eq!(replayed.final_fen, corrected_game.fen());
+        assert_eq!(replayed.moves.len(), 2);
+        assert_eq!(replayed.moves[0].revision, 1);
+        assert_eq!(replayed.moves[0].uci, first.uci);
+        assert_eq!(replayed.moves[1], replacement);
+        assert_eq!(store.load_moves(game_id, 0).unwrap(), vec![first, second]);
+    }
+
+    #[test]
+    fn upgrades_existing_v1_database() {
+        let path = std::env::temp_dir().join(format!("chess-storage-v1-{}.sqlite", Uuid::now_v7()));
+        let game_id = GameId::new();
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection.execute_batch(SCHEMA_V1).unwrap();
+            connection.pragma_update(None, "user_version", 1).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO games (id, created_utc_us, initial_fen, result, status,
+                  active_revision, head_sequence) VALUES (?1, 100, ?2, '*', 'recording', 0, 0)",
+                    params![game_id.0.to_string(), ChessGame::standard().initial_fen()],
+                )
+                .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 2);
+        assert_eq!(store.revision_history(game_id).unwrap().len(), 1);
+        drop(store);
+        std::fs::remove_file(&path).unwrap();
     }
 }

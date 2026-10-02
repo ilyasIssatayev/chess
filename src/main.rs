@@ -99,8 +99,11 @@ fn build_demo_pgn() -> Result<String> {
         clock_us += 225_000;
     }
 
-    let moves = store.load_moves(game_id, 0).context("reload demo moves")?;
-    Ok(to_pgn(&PgnMetadata::default(), &moves, true)?)
+    let replayed = store
+        .replay_active_game(game_id)
+        .context("replay persisted demo game")?;
+    anyhow::ensure!(replayed.final_fen == chess.fen(), "demo replay diverged");
+    Ok(to_pgn(&PgnMetadata::default(), &replayed.moves, true)?)
 }
 
 fn synthetic_observation(
