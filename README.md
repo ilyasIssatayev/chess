@@ -4,7 +4,7 @@ Planned macOS application using the built-in MacBook camera to observe a physica
 
 The priority is precise move recording, with explicit review when the visual evidence is ambiguous.
 
-See the [phased multi-agent development plan](docs/development-plan.md) for architecture, agent responsibilities, milestone gates, vision model candidates, timing semantics, database design, and validation targets.
+See the [phased multi-agent development plan](docs/development-plan.md) for architecture, agent responsibilities, milestone gates, vision model candidates, timing semantics, database design, and validation targets. Its [five-hour work-frame schedule](docs/development-plan.md#five-hour-work-frames-and-development-models) gives numbered steps, checkpoints, and recommended Codex models/reasoning for each session.
 
 The repository currently contains a Rust binary scaffold. Once a Rust toolchain is available:
 
