@@ -1,0 +1,81 @@
+:root {
+  color-scheme: dark;
+  --bg: #0a0c0b;
+  --panel: #121614;
+  --line: #29302c;
+  --muted: #879189;
+  --text: #f3f6f2;
+  --green: #55d987;
+  --amber: #f4bd50;
+  --red: #ff7369;
+  --blue: #77a9ff;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  min-width: 320px;
+  background: radial-gradient(circle at 20% -20%, #1d2821 0, transparent 35%), var(--bg);
+  color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.shell { width: min(1440px, 100%); margin: 0 auto; padding: 28px; }
+header, .panel-heading, .health-row, .candidate, .controls, .control-group {
+  display: flex; align-items: center; justify-content: space-between;
+}
+header { margin-bottom: 22px; }
+h1 { margin: 2px 0 0; font-size: 30px; letter-spacing: -.03em; }
+.eyebrow, .section-label { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .14em; }
+.eyebrow { margin: 0; }
+.capture-state { display: flex; align-items: center; gap: 9px; color: var(--muted); }
+#capture-dot { width: 9px; height: 9px; border-radius: 50%; background: #525a55; box-shadow: 0 0 0 4px #525a5525; }
+#capture-dot.live { background: var(--green); box-shadow: 0 0 0 4px #55d98725; }
+.layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(300px, .7fr); gap: 18px; }
+.panel { background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 18px 60px #0004; }
+.panel-heading { padding: 16px 18px; }
+.panel-heading > div { display: grid; gap: 3px; }
+.panel-heading > span:last-child, #move-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.viewport { position: relative; overflow: hidden; aspect-ratio: 16 / 9; background: #080a09; border-block: 1px solid var(--line); }
+video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.empty-camera { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); background: linear-gradient(135deg, #111512, #090b0a); }
+.lens { width: 64px; height: 46px; border: 2px solid #465049; border-radius: 12px; position: relative; }
+.lens::before { content: ""; position: absolute; width: 20px; height: 20px; border: 2px solid #465049; border-radius: 50%; inset: 0; margin: auto; }
+.lens::after { content: ""; position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #465049; right: 7px; top: 7px; }
+.board-overlay { position: absolute; left: 16%; top: 14%; width: 68%; height: 72%; border: 2px solid #7be59b; opacity: .78; display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); transform: perspective(700px) rotateX(8deg); transform-origin: bottom; pointer-events: none; }
+.square { border: .5px solid #c5ffd642; position: relative; }
+.square.changed { background: #f4bd5040; box-shadow: inset 0 0 0 2px var(--amber); }
+.square.changed::after { content: attr(data-name); position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 700; }
+.corner { position: absolute; padding: 3px 6px; border-radius: 5px; color: #08100b; background: var(--green); font-size: 10px; font-weight: 800; opacity: .85; }
+.corner-a8 { left: 14.5%; top: 11%; } .corner-h8 { right: 14.5%; top: 11%; }
+.corner-a1 { left: 14.5%; bottom: 10%; } .corner-h1 { right: 14.5%; bottom: 10%; }
+.motion-badge { position: absolute; top: 14px; right: 14px; padding: 7px 10px; border-radius: 7px; color: var(--green); background: #07130dcb; border: 1px solid #55d98755; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.motion-badge.moving { color: var(--amber); background: #1d1406d9; border-color: #f4bd5066; }
+.health-row { padding: 15px 18px; gap: 16px; }
+.health-row div { display: grid; flex: 1; gap: 4px; }
+.health-row span { color: var(--muted); font-size: 12px; }
+.health-row strong { font-size: 13px; }
+.side-column { display: grid; grid-template-rows: auto 1fr; gap: 18px; }
+.decision { padding: 20px; min-height: 310px; }
+.decision-icon { display: grid; place-items: center; margin: 30px 0 18px; width: 54px; height: 54px; border-radius: 50%; background: #202622; color: var(--muted); font-size: 30px; font-weight: 800; }
+.decision h2 { margin: 0 0 8px; font-size: 23px; letter-spacing: -.02em; }
+.decision p { min-height: 44px; margin: 0; color: var(--muted); }
+.decision[data-state="accepted"] .decision-icon { background: #55d98720; color: var(--green); }
+.decision[data-state="review"] .decision-icon { background: #f4bd5020; color: var(--amber); }
+.decision[data-state="moving"] .decision-icon { background: #77a9ff20; color: var(--blue); }
+.candidate { margin-top: 22px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #090c0a; }
+.candidate div { display: grid; gap: 2px; }
+.candidate span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.candidate div:last-child { text-align: right; }
+.moves-panel { min-height: 250px; overflow: hidden; }
+.empty-moves { padding: 34px 18px; color: var(--muted); text-align: center; }
+#moves { list-style: none; margin: 0; padding: 0 18px 16px; }
+#moves li { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; padding: 11px 0; border-top: 1px solid var(--line); }
+#moves span { color: var(--muted); } #moves time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.controls { margin-top: 18px; padding: 14px; gap: 18px; }
+.control-group { gap: 10px; justify-content: flex-start; }
+button { appearance: none; border: 1px solid #38423b; background: #1a201c; color: var(--text); border-radius: 9px; padding: 10px 14px; font: inherit; font-weight: 650; cursor: pointer; }
+button:hover { border-color: #68756c; } button.primary { color: #07110b; background: var(--green); border-color: var(--green); }
+.controls p { margin: 0; color: var(--muted); font-size: 12px; text-align: right; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .controls { align-items: stretch; flex-direction: column; } .controls p { text-align: left; } }
+@media (max-width: 520px) { .shell { padding: 16px; } .health-row { align-items: flex-start; flex-direction: column; } .control-group { align-items: stretch; flex-direction: column; } }

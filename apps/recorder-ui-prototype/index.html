@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess Camera Recorder</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <p class="eyebrow">CHESS CAMERA RECORDER</p>
+        <h1>Live game</h1>
+      </div>
+      <div class="capture-state"><span id="capture-dot"></span><span id="capture-label">Camera idle</span></div>
+    </header>
+
+    <section class="layout">
+      <div class="camera-panel panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-label">CAMERA</span>
+            <strong id="camera-detail">Preview unavailable</strong>
+          </div>
+          <span id="fps">— fps</span>
+        </div>
+
+        <div class="viewport" id="viewport">
+          <video id="video" autoplay muted playsinline></video>
+          <div class="empty-camera" id="empty-camera">
+            <div class="lens"></div>
+            <p>Start the camera to check board placement</p>
+          </div>
+          <div class="board-overlay" id="board-overlay" aria-label="calibrated chessboard overlay"></div>
+          <div class="motion-badge" id="motion-badge">NO MOTION</div>
+          <div class="corner corner-a1">a1</div>
+          <div class="corner corner-h1">h1</div>
+          <div class="corner corner-a8">a8</div>
+          <div class="corner corner-h8">h8</div>
+        </div>
+
+        <div class="health-row">
+          <div><span>Board visibility</span><strong id="visibility">Waiting</strong></div>
+          <div><span>Frame timing</span><strong id="timing">Waiting</strong></div>
+          <div><span>Calibration</span><strong id="calibration">Demo overlay</strong></div>
+        </div>
+      </div>
+
+      <aside class="side-column">
+        <section class="decision panel" id="decision-card" data-state="idle">
+          <span class="section-label">RECORDER DECISION</span>
+          <div class="decision-icon" id="decision-icon">·</div>
+          <h2 id="decision-title">Waiting for camera</h2>
+          <p id="decision-copy">No chess move has been recorded.</p>
+          <div class="candidate" id="candidate" hidden>
+            <div><span>Detected</span><strong id="candidate-san">e4</strong></div>
+            <div><span>Squares</span><strong id="candidate-squares">e2 → e4</strong></div>
+          </div>
+        </section>
+
+        <section class="panel moves-panel">
+          <div class="panel-heading">
+            <span class="section-label">TRUSTED MOVES</span>
+            <span id="move-count">0 plies</span>
+          </div>
+          <div class="empty-moves" id="empty-moves">Accepted moves will appear here.</div>
+          <ol id="moves"></ol>
+        </section>
+      </aside>
+    </section>
+
+    <section class="controls panel">
+      <div class="control-group">
+        <button class="primary" id="camera-button">Start camera</button>
+        <button id="demo-button">Play decision demo</button>
+        <button id="review-button">Show ambiguity</button>
+      </div>
+      <p><strong>Prototype:</strong> camera motion is measured locally. Move recognition buttons simulate future Rust decoder events.</p>
+    </section>
+  </main>
+  <canvas id="motion-canvas" width="64" height="36" hidden></canvas>
+  <script src="app.js"></script>
+</body>
+</html>

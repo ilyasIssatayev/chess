@@ -56,3 +56,7 @@ The [development plan](docs/development-plan.md) defines the architecture, 22 fi
 
 The accepted workspace, persistence, result, and provisional timestamp choices
 are recorded in the [Phase 1 decisions](docs/phase-1-decisions.md).
+
+An interactive [recording-screen prototype](apps/recorder-ui-prototype/README.md)
+shows the intended camera overlay, motion state, accepted moves, and ambiguity
+workflow before the production Tauri integration.
