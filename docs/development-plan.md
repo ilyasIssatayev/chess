@@ -1,6 +1,6 @@
 # Chess camera recorder: phased development plan
 
-Planning baseline: 2 October 2026. Implementation progress and measured hardware results are tracked in [the work log](work-log.md). The repository now contains the Rust workspace, camera probe, shared contracts, chess/storage/export foundations, evaluation tooling, and a synthetic temporal-decoder baseline; phase gates remain governed by the evidence requirements below.
+Planning baseline: 2 October 2026. Implementation progress and measured hardware results are tracked in [the work log](work-log.md). The repository now contains the Rust workspace, camera probe, shared contracts, chess/storage/export foundations, evaluation tooling, manual board geometry, and a synthetic temporal-decoder baseline; phase gates remain governed by the evidence requirements below.
 
 ## Goal and first release
 

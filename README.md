@@ -8,6 +8,7 @@ The implementation currently provides:
 - shared observation, move, timing, evidence, and review contracts;
 - legal UCI move application with canonical SAN/FEN through `cozy-chess`;
 - a conservative temporal decoder that compares unchanged and legal-successor positions;
+- validated four-corner projective geometry for manual board calibration;
 - transactional SQLite game/event/move storage;
 - PGN export with optional descriptive timing comments; and
 - session-separated evaluation manifests with leakage and annotation validation.
@@ -46,6 +47,8 @@ cargo run -p capture-probe -- sample \
 ```
 
 Camera samples stay under ignored `local-data/` because they may contain private room imagery. See the [camera probe guide](docs/camera-probe.md) before interpreting its process-side timestamps.
+
+The preparatory [manual geometry guide](docs/geometry.md) describes the labeled-corner convention used to map chess squares into an image.
 
 ## Project status and plan
 

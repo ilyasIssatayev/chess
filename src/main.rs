@@ -20,6 +20,12 @@ fn main() -> Result<()> {
 }
 
 fn build_demo_pgn() -> Result<String> {
+    let mut store = Store::open_in_memory().context("open demo database")?;
+    let (game_id, chess) = record_synthetic_game(&mut store)?;
+    export_replayed_game(&store, game_id, &chess)
+}
+
+fn record_synthetic_game(store: &mut Store) -> Result<(GameId, ChessGame)> {
     let game_id = GameId::new();
     let session_id = SessionId::new();
     let mut chess = ChessGame::standard();
@@ -27,8 +33,7 @@ fn build_demo_pgn() -> Result<String> {
         settle_time_us: 100_000,
         consistent_frames: 2,
         ..DecoderConfig::default()
-    });
-    let mut store = Store::open_in_memory().context("open demo database")?;
+    })?;
     store
         .create_game(game_id, chess.initial_fen(), 0)
         .context("create demo game")?;
@@ -38,6 +43,10 @@ fn build_demo_pgn() -> Result<String> {
     let mut previous_completion: Option<TimeBounds> = None;
     let initial = synthetic_observation(&chess, session_id, sequence, clock_us, false)?;
     let _ = decoder.ingest(&chess, &initial)?;
+    sequence += 1;
+    clock_us += 100_000;
+    let initial_confirmed = synthetic_observation(&chess, session_id, sequence, clock_us, false)?;
+    let _ = decoder.ingest(&chess, &initial_confirmed)?;
 
     for (index, uci) in ["e2e4", "e7e5", "g1f3"].iter().enumerate() {
         sequence += 1;
@@ -82,7 +91,9 @@ fn build_demo_pgn() -> Result<String> {
             fen_before: applied.fen_before,
             fen_after: applied.fen_after,
             provenance: MoveProvenance::Automatic,
-            confidence: Some(proposed.average_log_likelihood.exp() as f32),
+            // The decoder score is an evidence likelihood, not a calibrated
+            // probability that the move is correct.
+            confidence: None,
             timing: MoveTiming {
                 completion: Some(proposed.completion_bounds),
                 elapsed_since_previous,
@@ -99,10 +110,14 @@ fn build_demo_pgn() -> Result<String> {
         clock_us += 225_000;
     }
 
+    Ok((game_id, chess))
+}
+
+fn export_replayed_game(store: &Store, game_id: GameId, expected: &ChessGame) -> Result<String> {
     let replayed = store
         .replay_active_game(game_id)
         .context("replay persisted demo game")?;
-    anyhow::ensure!(replayed.final_fen == chess.fen(), "demo replay diverged");
+    anyhow::ensure!(replayed.final_fen == expected.fen(), "demo replay diverged");
     Ok(to_pgn(&PgnMetadata::default(), &replayed.moves, true)?)
 }
 
@@ -155,5 +170,24 @@ mod tests {
         assert!(pgn.contains("e5"));
         assert!(pgn.contains("2. Nf3"));
         assert!(pgn.contains("elapsed"));
+    }
+
+    #[test]
+    fn synthetic_pipeline_survives_database_reopen() {
+        let marker = GameId::new().0;
+        let path = std::env::temp_dir().join(format!("chess-pipeline-{marker}.sqlite"));
+        let (game_id, expected) = {
+            let mut store = Store::open(&path).unwrap();
+            record_synthetic_game(&mut store).unwrap()
+        };
+
+        let reopened = Store::open(&path).unwrap();
+        let pgn = export_replayed_game(&reopened, game_id, &expected).unwrap();
+        assert!(pgn.contains("1. e4"));
+        drop(reopened);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", path.display()));
     }
 }

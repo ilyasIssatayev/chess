@@ -58,6 +58,12 @@ impl ChessGame {
         &self.history
     }
 
+    /// Returns the position-only status reported by `cozy-chess`.
+    ///
+    /// This reports a draw when the FEN halfmove clock reaches 100 plies, but it
+    /// does not distinguish a claim from an automatic result. It also does not
+    /// scan this game's history for threefold repetition. Higher-level game
+    /// adjudication must track repetition and draw claims separately.
     pub fn status(&self) -> GameStatus {
         self.board.status()
     }
@@ -220,6 +226,25 @@ mod tests {
     }
 
     #[test]
+    fn handles_both_black_castling_sides() {
+        let fen = "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1";
+        let mut kingside = ChessGame::from_fen(fen).unwrap();
+        let mut queenside = ChessGame::from_fen(fen).unwrap();
+
+        assert_eq!(kingside.play_uci("e8g8").unwrap().san, "O-O");
+        assert_eq!(class_at(&kingside, "g8"), Some(PieceClass::BlackKing));
+        assert_eq!(class_at(&kingside, "f8"), Some(PieceClass::BlackRook));
+        assert_eq!(class_at(&kingside, "e8"), None);
+        assert_eq!(class_at(&kingside, "h8"), None);
+
+        assert_eq!(queenside.play_uci("e8c8").unwrap().san, "O-O-O");
+        assert_eq!(class_at(&queenside, "c8"), Some(PieceClass::BlackKing));
+        assert_eq!(class_at(&queenside, "d8"), Some(PieceClass::BlackRook));
+        assert_eq!(class_at(&queenside, "e8"), None);
+        assert_eq!(class_at(&queenside, "a8"), None);
+    }
+
+    #[test]
     fn records_captures_and_removes_the_captured_piece() {
         let mut game = ChessGame::standard();
         let applied = play(&mut game, &["e2e4", "d7d5", "e4d5", "d8d5"]);
@@ -243,6 +268,16 @@ mod tests {
     }
 
     #[test]
+    fn records_check_marker_without_ending_the_game() {
+        let mut game = ChessGame::standard();
+        let applied = play(&mut game, &["e2e4", "f7f6", "d1h5"]);
+
+        assert_eq!(applied.last().unwrap().san, "Qh5+");
+        assert_eq!(game.status(), GameStatus::Ongoing);
+        assert!(!game.legal_uci_moves().is_empty());
+    }
+
+    #[test]
     fn disambiguates_knights_that_can_reach_the_same_square() {
         let fen = "4k3/8/8/8/8/8/8/1N2KN2 w - - 0 1";
         let mut queen_knight = ChessGame::from_fen(fen).unwrap();
@@ -250,6 +285,24 @@ mod tests {
 
         assert_eq!(queen_knight.play_uci("b1d2").unwrap().san, "Nbd2");
         assert_eq!(king_knight.play_uci("f1d2").unwrap().san, "Nfd2");
+    }
+
+    #[test]
+    fn disambiguates_by_rank_when_same_file_rooks_can_move() {
+        let fen = "7k/8/8/8/8/R7/8/R6K w - - 0 1";
+        let mut first_rank = ChessGame::from_fen(fen).unwrap();
+        let mut third_rank = ChessGame::from_fen(fen).unwrap();
+
+        assert_eq!(first_rank.play_uci("a1a2").unwrap().san, "R1a2");
+        assert_eq!(third_rank.play_uci("a3a2").unwrap().san, "R3a2");
+    }
+
+    #[test]
+    fn disambiguates_by_full_origin_square_when_required() {
+        let fen = "7k/8/8/1N6/8/1N3N2/8/7K w - - 0 1";
+        let mut game = ChessGame::from_fen(fen).unwrap();
+
+        assert_eq!(game.play_uci("b3d4").unwrap().san, "Nb3d4");
     }
 
     #[test]
@@ -278,6 +331,42 @@ mod tests {
             assert_eq!(class_at(&game, "a8"), Some(expected_class));
             assert_eq!(class_at(&game, "a7"), None);
         }
+    }
+
+    #[test]
+    fn records_a_promotion_capture() {
+        let mut game = ChessGame::from_fen("1r5k/P7/8/8/8/8/8/7K w - - 0 1").unwrap();
+
+        assert_eq!(game.play_uci("a7b8q").unwrap().san, "axb8=Q+");
+        assert_eq!(class_at(&game, "b8"), Some(PieceClass::WhiteQueen));
+        assert_eq!(class_at(&game, "a7"), None);
+    }
+
+    #[test]
+    fn handles_black_promotion() {
+        let mut game = ChessGame::from_fen("7k/8/8/8/8/8/p7/7K b - - 0 1").unwrap();
+
+        assert_eq!(game.play_uci("a2a1q").unwrap().san, "a1=Q+");
+        assert_eq!(class_at(&game, "a1"), Some(PieceClass::BlackQueen));
+        assert_eq!(class_at(&game, "a2"), None);
+    }
+
+    #[test]
+    fn identifies_stalemate_as_drawn() {
+        let game = ChessGame::from_fen("k7/2Q5/2K5/8/8/8/8/8 b - - 0 1").unwrap();
+
+        assert_eq!(game.status(), GameStatus::Drawn);
+        assert!(game.legal_uci_moves().is_empty());
+    }
+
+    #[test]
+    fn status_uses_the_fen_halfmove_clock_for_the_fifty_move_threshold() {
+        let before_threshold = ChessGame::from_fen("7k/8/8/8/8/8/R7/7K w - - 99 51").unwrap();
+        let at_threshold = ChessGame::from_fen("7k/8/8/8/8/8/R7/7K w - - 100 51").unwrap();
+
+        assert_eq!(before_threshold.status(), GameStatus::Ongoing);
+        assert_eq!(at_threshold.status(), GameStatus::Drawn);
+        assert!(!at_threshold.legal_uci_moves().is_empty());
     }
 
     #[test]
@@ -322,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn rebuilds_a_reference_history_with_a_threefold_position() {
+    fn rebuilds_a_threefold_position_without_adjudicating_repetition() {
         let moves = [
             "g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1", "f6g8",
         ];
@@ -343,6 +432,8 @@ mod tests {
         assert_eq!(repetition_key(&game.history()[3].fen_after), initial_key);
         assert_eq!(repetition_key(&game.history()[7].fen_after), initial_key);
         assert_eq!(repetition_key(&game.fen()), initial_key);
+        // `Board::status` has no prior-position history, so repetition is a
+        // separate higher-level adjudication concern.
         assert_eq!(game.status(), GameStatus::Ongoing);
     }
 

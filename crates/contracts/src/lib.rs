@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -175,10 +177,23 @@ pub struct FrameObservation {
 
 impl FrameObservation {
     pub fn validate(&self) -> Result<(), ContractError> {
+        if self.calibration_version.trim().is_empty() {
+            return Err(ContractError::EmptyCalibrationVersion);
+        }
+        if self.model_version.trim().is_empty() {
+            return Err(ContractError::EmptyModelVersion);
+        }
         if self.squares.len() != SQUARE_COUNT {
             return Err(ContractError::WrongSquareCount(self.squares.len()));
         }
+        let mut square_names = HashSet::with_capacity(SQUARE_COUNT);
         for evidence in &self.squares {
+            if !is_square_name(&evidence.square) {
+                return Err(ContractError::InvalidSquareName(evidence.square.clone()));
+            }
+            if !square_names.insert(evidence.square.as_str()) {
+                return Err(ContractError::DuplicateSquareName(evidence.square.clone()));
+            }
             validate_probability(evidence.visible_probability)?;
             validate_probability(evidence.empty_probability)?;
             for probability in evidence.piece_probabilities {
@@ -214,6 +229,31 @@ pub struct MoveTiming {
     pub quality: TimingQuality,
 }
 
+impl MoveTiming {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        match self.quality {
+            TimingQuality::Observed | TimingQuality::Bounded if self.completion.is_none() => {
+                return Err(ContractError::MissingCompletionBounds(self.quality));
+            }
+            TimingQuality::Unknown
+                if self.completion.is_some() || self.elapsed_since_previous.is_some() =>
+            {
+                return Err(ContractError::UnknownTimingHasBounds);
+            }
+            _ => {}
+        }
+        if let Some(completion) = self.completion
+            && self.confirmation_time < completion.latest
+        {
+            return Err(ContractError::ConfirmationBeforeCompletion {
+                confirmation: self.confirmation_time.get(),
+                completion_latest: completion.latest.get(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MoveRecord {
     pub game_id: GameId,
@@ -227,6 +267,35 @@ pub struct MoveRecord {
     pub confidence: Option<f32>,
     pub timing: MoveTiming,
     pub evidence_ids: Vec<String>,
+}
+
+impl MoveRecord {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        if self.ply == 0 {
+            return Err(ContractError::ZeroPly);
+        }
+        if self.uci.trim().is_empty()
+            || self.san.trim().is_empty()
+            || self.fen_before.trim().is_empty()
+            || self.fen_after.trim().is_empty()
+        {
+            return Err(ContractError::EmptyMoveField);
+        }
+        if let Some(confidence) = self.confidence {
+            validate_probability(confidence)?;
+        }
+        self.timing.validate()?;
+        let mut evidence_ids = HashSet::with_capacity(self.evidence_ids.len());
+        for evidence_id in &self.evidence_ids {
+            if evidence_id.trim().is_empty() {
+                return Err(ContractError::EmptyEvidenceId);
+            }
+            if !evidence_ids.insert(evidence_id.as_str()) {
+                return Err(ContractError::DuplicateEvidenceId(evidence_id.clone()));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -275,6 +344,33 @@ pub enum ContractError {
     WrongSquareCount(usize),
     #[error("probability must be finite and between 0 and 1")]
     InvalidProbability,
+    #[error("calibration version cannot be empty")]
+    EmptyCalibrationVersion,
+    #[error("model version cannot be empty")]
+    EmptyModelVersion,
+    #[error("invalid chess square name: {0}")]
+    InvalidSquareName(String),
+    #[error("duplicate chess square evidence: {0}")]
+    DuplicateSquareName(String),
+    #[error("{0:?} timing requires completion bounds")]
+    MissingCompletionBounds(TimingQuality),
+    #[error("unknown timing cannot contain completion or elapsed bounds")]
+    UnknownTimingHasBounds,
+    #[error(
+        "confirmation time {confirmation} precedes the latest completion bound {completion_latest}"
+    )]
+    ConfirmationBeforeCompletion {
+        confirmation: i64,
+        completion_latest: i64,
+    },
+    #[error("move ply must be at least one")]
+    ZeroPly,
+    #[error("UCI, SAN, and FEN move fields cannot be empty")]
+    EmptyMoveField,
+    #[error("evidence identifier cannot be empty")]
+    EmptyEvidenceId,
+    #[error("duplicate evidence identifier: {0}")]
+    DuplicateEvidenceId(String),
 }
 
 fn validate_probability(value: f32) -> Result<(), ContractError> {
@@ -283,6 +379,11 @@ fn validate_probability(value: f32) -> Result<(), ContractError> {
     } else {
         Err(ContractError::InvalidProbability)
     }
+}
+
+fn is_square_name(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 2 && (b'a'..=b'h').contains(&bytes[0]) && (b'1'..=b'8').contains(&bytes[1])
 }
 
 #[cfg(test)]
@@ -354,5 +455,83 @@ mod tests {
         let elapsed = current.elapsed_since(previous).unwrap();
         assert_eq!(elapsed.earliest.get(), 0);
         assert_eq!(elapsed.latest.get(), 300_000);
+    }
+
+    fn valid_observation() -> FrameObservation {
+        let mut squares = Vec::with_capacity(SQUARE_COUNT);
+        for rank in b'1'..=b'8' {
+            for file in b'a'..=b'h' {
+                squares.push(SquareEvidence {
+                    square: String::from_utf8(vec![file, rank]).unwrap(),
+                    visible_probability: 1.0,
+                    empty_probability: 1.0,
+                    piece_probabilities: [0.0; PIECE_CLASS_COUNT],
+                });
+            }
+        }
+        FrameObservation {
+            session_id: SessionId::new(),
+            sequence: 0,
+            capture_time: CaptureTimeUs::new(0).unwrap(),
+            moving: false,
+            calibration_version: "calibration-v1".into(),
+            model_version: "model-v1".into(),
+            squares,
+        }
+    }
+
+    #[test]
+    fn observation_requires_every_square_exactly_once() {
+        let mut observation = valid_observation();
+        assert_eq!(observation.validate(), Ok(()));
+
+        observation.squares[1].square = observation.squares[0].square.clone();
+        assert!(matches!(
+            observation.validate(),
+            Err(ContractError::DuplicateSquareName(_))
+        ));
+
+        observation = valid_observation();
+        observation.squares[0].square = "z9".into();
+        assert!(matches!(
+            observation.validate(),
+            Err(ContractError::InvalidSquareName(_))
+        ));
+    }
+
+    #[test]
+    fn timing_quality_and_confirmation_are_consistent() {
+        let completion = TimeBounds::new(
+            CaptureTimeUs::new(100).unwrap(),
+            CaptureTimeUs::new(200).unwrap(),
+        )
+        .unwrap();
+        let valid = MoveTiming {
+            completion: Some(completion),
+            elapsed_since_previous: None,
+            confirmation_time: CaptureTimeUs::new(250).unwrap(),
+            quality: TimingQuality::Bounded,
+        };
+        assert_eq!(valid.validate(), Ok(()));
+
+        let missing = MoveTiming {
+            completion: None,
+            ..valid.clone()
+        };
+        assert!(matches!(
+            missing.validate(),
+            Err(ContractError::MissingCompletionBounds(
+                TimingQuality::Bounded
+            ))
+        ));
+
+        let early = MoveTiming {
+            confirmation_time: CaptureTimeUs::new(199).unwrap(),
+            ..valid
+        };
+        assert!(matches!(
+            early.validate(),
+            Err(ContractError::ConfirmationBeforeCompletion { .. })
+        ));
     }
 }

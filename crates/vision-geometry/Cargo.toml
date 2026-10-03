@@ -1,11 +1,10 @@
 [package]
-name = "export"
+name = "vision-geometry"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
-chess-core = { path = "../chess-core" }
 contracts = { path = "../contracts" }
-thiserror.workspace = true

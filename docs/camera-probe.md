@@ -70,7 +70,7 @@ Run these checks on the target MacBook and preserve the console output plus the 
 5. Start a capture, cover the camera, unplug an external camera if one is being tested, or close the lid only when safe. Record whether the command returns an error or stalls. Do not infer disconnect handling from source code alone.
 6. Inspect `observed_fps`, `max_interarrival_ns`, `mean_capture_block_ns`, and `gap_count`. Retain the raw JSONL so later adapters can be compared using the same fields.
 
-Frame 1 passes only when a runnable probe, sample frames, format listing, permission/recovery observations, and timestamp report exist for the actual target MacBook. The repository currently contains the probe implementation but no physical-camera evidence.
+Frame 1 passes only when a runnable probe, sample frames, format listing, permission/recovery observations, and timestamp report exist for the actual target MacBook. The current target has a granted permission result, device/active-format report, a 120-frame timing run, and a one-frame RGB output check recorded in the [work log](work-log.md). Permission denial/recovery and interruption behavior remain untested, so Frame 1 has not passed.
 
 ## Frame 2 placement procedure
 
