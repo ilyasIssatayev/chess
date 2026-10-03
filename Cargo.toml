@@ -43,3 +43,5 @@ contracts = { path = "crates/contracts" }
 export = { path = "crates/export" }
 recorder-core = { path = "crates/recorder-core" }
 storage = { path = "crates/storage" }
+serde.workspace = true
+serde_json.workspace = true

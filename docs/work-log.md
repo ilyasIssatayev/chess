@@ -30,7 +30,7 @@ Nokhwa 0.10.11 initially requested an unsupported 640×480@15 YUYV default and r
 | F05 — Database journal and replay | implementation complete; awaiting F02 prerequisite | SQLite v3 migrations, rules-validated idempotent append, immutable correction revisions, append-only triggers, historical replay, and journal-versus-projection verification work | 13 storage tests cover restart, duplicates/conflicts, v1 migration, failed correction rollback, corrected suffixes, immutable history, replay, injected statement failures, and abrupt process termination during a WAL transaction | Re-run the integrated gate after F02 freezes the timestamp/session contracts. |
 | F06 — Offline playback and board calibration | in progress (preparatory) | `vision-geometry` validates manually labeled corners and maps board/image points plus square centers/polygons through an invertible homography | 7 synthetic tests cover skew, both labeled orientations, invalid polygons/inputs, round trips, and projection range | Build deterministic media playback and a calibration overlay; measure real corner reprojection and lens distortion using separate F02 recordings. |
 | F09 — Temporal move decoder | in progress (preparatory) | Synthetic state machine ranks unchanged plus legal successors, applies absolute/per-square/margin gates, requires full visibility for automatic moves, preserves conservative completion bounds, and latches on stream/session/model/calibration discontinuities | 8 tests cover a clear move, adjustment, hidden board, fully visible and partially hidden two-ply gaps, invalid thresholds, reset boundaries, and gap sequencing | Validate captures, compound moves, ambiguity, real visibility, gap recovery, and timing on sessions produced by F06–F08. Thresholds remain unqualified. |
-| F15 — Desktop recording screen | prototype only | Dependency-free interactive screen shows local camera preview, board overlay, coarse motion state, changed squares, accepted/ambiguous decisions, timing/health placeholders, and trusted moves | Visually inspected in Chrome; JavaScript parses with the macOS JavaScript compiler and `git diff --check` passes | Connect the UI to versioned Rust recorder events when the Tauri shell and live Phase 4 pipeline exist. |
+| F15 — Desktop recording screen | functional browser baseline; Tauri pending | Dependency-free interactive screen shows local camera preview, draggable four-corner projective calibration, geometry rejection/warnings, coarse motion state, changed squares, accepted/ambiguous decisions, timing/health placeholders, and trusted moves | Initial screen and live camera were visually inspected in Chrome; calibration JavaScript parses with the macOS JavaScript compiler and `git diff --check` passes | Browser now connects camera square changes to Rust rules, journaled moves, review, undo and PGN. Qualify the change detector on physical sessions and integrate piece evidence and versioned events in the Tauri shell. |
 
 The Phase 1 software implementation gate passes: deterministic replay, legal notation, transactional/idempotent commits, special moves, repetition policy, restart, and abrupt-termination recovery are covered. The planned phase sequence still awaits the Phase 0 physical prerequisite, so Phase 1 is recorded as implementation-complete rather than physically unblocked. No move-recognition accuracy claim is possible until independent real sessions exist.
 
@@ -52,3 +52,39 @@ The Phase 1 software implementation gate passes: deterministic replay, legal not
 Run `scripts/collect-board-readiness.sh local-data/board-readiness/session-001` with the populated board, then capture the scripted F02 moves, annotate separate development/validation sessions, and decide Phase 0 feasibility. Also test F01 packaged-app denial/recovery and interruption behavior. Those recordings then feed deterministic playback, real calibration overlays, and observation/model evaluation.
 
 The 3 October Phase 1 completion reran formatting, the full offline workspace suite (**87 tests**), strict Clippy, the synthetic demo, and `git diff --check` with the project-local toolchain. The app bundle's code signature and granted camera-permission path also pass. Nokhwa's transitive `block 0.1.6` still emits a future-Rust incompatibility warning; keeping capture behind its adapter remains necessary.
+
+
+## 3 October — Make the current recording app functional
+
+The visible app previously compared coarse whole-frame motion only. There was
+no camera move recognizer, rules API, or storage connection; demo buttons were
+the only path to its in-memory move list. The preview also mirrored the camera
+while calibration coordinates did not.
+
+Added a loopback Rust recorder server (`cargo run -- serve`, or
+`scripts/start-recorder.sh`) and connected the browser to legal successor
+positions, canonical SAN, SQLite commits, reload/resume, audited undo, new games
+and PGN export. The camera now uses an unmirrored, aspect-matched preview and
+samples 64 calibrated square interiors. A user-confirmed reference, exposure
+compensation, localized motion gating, 900 ms settling and three consistent
+changed-square observations drive legal-move suggestions. Review is the default;
+automatic recording is opt-in and experimental. Camera interruptions, hidden
+tabs and calibration/sensitivity changes require a fresh reference. Manual
+recording and a tracked board provide recovery when recognition abstains.
+
+This is an F15/F07 classical functional baseline, not the production temporal
+piece-evidence decoder or an F02/F08 recognition-accuracy gate. Starting piece
+identities and visibility are user-confirmed; no learned piece model or physical
+accuracy measurement was added. Completion timings remain unknown.
+
+Validation: all 90 Rust workspace tests and strict offline Clippy pass. Eight
+JavaScript pixel/temporal regressions cover a real pixel e2–e4 change, exposure
+shifts, settling, duplicate prevention, hands, adjustments, illegal patterns,
+compound moves, promotion ambiguity and reset. Live browser checks on an isolated database recorded e4, persisted it across a
+page reload, recorded e5, and undid e5. HTTP checks verified canonical PGN,
+file-backed resume after restarting the server, rejection of private filesystem
+routes, and rejection of cross-origin writes. No browser console warnings or
+errors appeared. Visual inspection caught and corrected unequal tracked-board
+row heights. The user recorder is left running on localhost:8770 with its own
+untouched game database; the old static preview on port 8765 has no recorder API.
+The physical camera/move workflow still needs user-board validation.

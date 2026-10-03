@@ -8,10 +8,16 @@ use export::{PgnMetadata, to_pgn};
 use recorder_core::{DecoderConfig, DecoderDecision, TemporalDecoder};
 use storage::Store;
 
+mod server;
+
 fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("serve") {
+        return server::run();
+    }
     if std::env::args().nth(1).as_deref() != Some("demo") {
         println!("Chess camera recorder scaffold");
         println!("Run `cargo run -- demo` to exercise chess, storage, and PGN export.");
+        println!("Run `cargo run -- serve` to open the functional local recorder.");
         return Ok(());
     }
 

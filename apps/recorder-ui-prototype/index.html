@@ -16,7 +16,9 @@
       <div class="capture-state"><span id="capture-dot"></span><span id="capture-label">Camera idle</span></div>
     </header>
 
+    <p class="setup-guide">Start camera → calibrate the four board corners → match the physical position to the tracked board → set a reference. Then play one move at a time.</p>
     <section class="layout">
+      <div class="camera-column">
       <div class="camera-panel panel">
         <div class="panel-heading">
           <div>
@@ -32,23 +34,54 @@
             <div class="lens"></div>
             <p>Start the camera to check board placement</p>
           </div>
-          <div class="board-overlay" id="board-overlay" aria-label="calibrated chessboard overlay"></div>
+          <svg class="board-overlay" id="board-overlay" aria-label="calibrated chessboard overlay">
+            <g id="square-fills"></g>
+            <g id="grid-lines"></g>
+            <g id="corner-handles"></g>
+          </svg>
           <div class="motion-badge" id="motion-badge">NO MOTION</div>
-          <div class="corner corner-a1">a1</div>
-          <div class="corner corner-h1">h1</div>
-          <div class="corner corner-a8">a8</div>
-          <div class="corner corner-h8">h8</div>
+          <div class="calibration-help" id="calibration-help" hidden>
+            Drag each labeled point onto the matching outer board corner.
+          </div>
         </div>
 
         <div class="health-row">
           <div><span>Board visibility</span><strong id="visibility">Waiting</strong></div>
           <div><span>Frame timing</span><strong id="timing">Waiting</strong></div>
-          <div><span>Calibration</span><strong id="calibration">Demo overlay</strong></div>
+          <div><span>Calibration</span><strong id="calibration">Set board corners first</strong></div>
         </div>
       </div>
 
+    <section class="controls panel">
+      <div class="control-group">
+        <button class="primary" id="camera-button">Start camera</button>
+        <button id="calibrate-button">Calibrate board</button>
+        <button id="reset-calibration-button" hidden>Reset corners</button>
+        <button id="reference-button" disabled>Set reference position</button>
+      </div>
+      <div class="recording-setup">
+        <label><input type="checkbox" id="position-confirm"> The physical board matches the tracked position and all squares are visible.</label>
+        <span id="recording-label">Recording paused</span>
+        <label><input type="checkbox" id="auto-record"> Automatically record unique matches (experimental)</label>
+        <label for="sensitivity">Change threshold <input id="sensitivity" type="range" min="6" max="24" value="10"> <span>Lower detects smaller changes</span></label>
+      </div>
+    </section>
+    <section class="controls panel review-controls" aria-label="Move review">
+      <div class="manual-entry">
+        <label for="manual-move">Detected or manually selected move</label>
+        <select id="manual-move"><option value="">Connecting to recorder…</option></select>
+        <button class="primary" id="record-button" disabled>Record selected move</button>
+      </div>
+      <div class="control-group">
+        <button id="undo-button" disabled>Undo last move</button>
+        <button id="export-button" disabled>Export PGN</button>
+        <button id="new-game-button" disabled>New game</button>
+      </div>
+      <p>Camera changes suggest legal moves; confirm the actual move when uncertain. Games save locally. Starting a new game keeps the previous game in the database.</p>
+    </section>
+      </div>
       <aside class="side-column">
-        <section class="decision panel" id="decision-card" data-state="idle">
+        <section class="decision panel" id="decision-card" data-state="idle" aria-live="polite">
           <span class="section-label">RECORDER DECISION</span>
           <div class="decision-icon" id="decision-icon">·</div>
           <h2 id="decision-title">Waiting for camera</h2>
@@ -59,9 +92,15 @@
           </div>
         </section>
 
+        <section class="panel position-panel">
+          <div class="panel-heading"><span class="section-label">TRACKED POSITION</span><strong id="turn">Connecting…</strong></div>
+          <div id="tracked-board" class="tracked-board" aria-label="Tracked chess position"></div>
+          <p id="game-status"></p>
+          <p class="board-hint">To enter a move manually, click its start and destination squares, then record it below.</p>
+        </section>
         <section class="panel moves-panel">
           <div class="panel-heading">
-            <span class="section-label">TRUSTED MOVES</span>
+            <span class="section-label">SAVED MOVES</span>
             <span id="move-count">0 plies</span>
           </div>
           <div class="empty-moves" id="empty-moves">Accepted moves will appear here.</div>
@@ -70,16 +109,9 @@
       </aside>
     </section>
 
-    <section class="controls panel">
-      <div class="control-group">
-        <button class="primary" id="camera-button">Start camera</button>
-        <button id="demo-button">Play decision demo</button>
-        <button id="review-button">Show ambiguity</button>
-      </div>
-      <p><strong>Prototype:</strong> camera motion is measured locally. Move recognition buttons simulate future Rust decoder events.</p>
-    </section>
   </main>
-  <canvas id="motion-canvas" width="64" height="36" hidden></canvas>
+  <canvas id="motion-canvas" width="640" height="360" hidden></canvas>
+  <script src="recorder.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -82,6 +82,19 @@ impl Store {
             .query_row("PRAGMA user_version", [], |row| row.get(0))?)
     }
 
+    /// Resume the most recently created game, including an empty recording.
+    pub fn latest_game_id(&self) -> Result<Option<GameId>, StorageError> {
+        let id: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT id FROM games ORDER BY created_utc_us DESC, id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(id.map(|id| GameId(Uuid::parse_str(&id).expect("stored game ID is a UUID"))))
+    }
+
     pub fn create_game(
         &mut self,
         game_id: GameId,

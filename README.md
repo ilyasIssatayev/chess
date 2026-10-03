@@ -57,6 +57,8 @@ The [development plan](docs/development-plan.md) defines the architecture, 22 fi
 The accepted workspace, persistence, result, and provisional timestamp choices
 are recorded in the [Phase 1 decisions](docs/phase-1-decisions.md).
 
-An interactive [recording-screen prototype](apps/recorder-ui-prototype/README.md)
-shows the intended camera overlay, motion state, accepted moves, and ambiguity
-workflow before the production Tauri integration.
+The [local browser recorder](apps/recorder-ui-prototype/README.md) now connects
+calibrated camera square changes to Rust legal moves, review, SQLite persistence,
+undo and PGN export. Start it with `./scripts/start-recorder.sh` and open
+<http://localhost:8770/>. Physical-board recognition is an experimental baseline
+and still needs qualification before production Tauri integration.

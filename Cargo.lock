@@ -104,6 +104,8 @@ dependencies = [
  "contracts",
  "export",
  "recorder-core",
+ "serde",
+ "serde_json",
  "storage",
 ]
 
