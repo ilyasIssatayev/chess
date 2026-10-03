@@ -118,3 +118,20 @@ select { color: var(--text); background: #1a201c; border: 1px solid #38423b; bor
 .moves-panel { min-height: 150px; }
 .tracked-board { grid-template-rows: repeat(8, minmax(0, 1fr)); }
 .chess-square { display: grid; place-items: center; min-height: 0; line-height: 1; }
+
+.camera-readout { margin-top: 18px; padding: 16px; }
+.camera-readout summary { cursor: pointer; font-weight: 650; }
+#model-detail { color: var(--muted); font-size: 13px; }
+#recognized-board { max-width: 340px; margin: 12px 0 0; }
+#recognized-board:empty { display: none; }
+.chess-square.uncertain { outline: 3px solid var(--amber); outline-offset: -3px; }
+.health-row { flex-wrap: wrap; }
+.health-row div { min-width: 120px; }
+.crop-inspector { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 20px; margin: 14px 0; }
+.crop-inspector > div { display: grid; gap: 8px; color: var(--muted); }
+.crop-inspector canvas { width: 100px; background: #000; border: 1px solid var(--line); image-rendering: auto; }
+.crop-inspector p { flex: 1; min-width: 160px; }
+.personal-actions { flex-wrap: wrap; margin: 14px 0; }
+#personal-setup > label { display: block; margin-block: 12px; }
+#personal-validation { color: var(--amber); }
+#recognized-board button { padding: 0; border: none; border-radius: 0; font-weight: 400; }

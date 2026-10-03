@@ -8,4 +8,7 @@ if [[ -x "$PROJECT_DIR/.toolchain/cargo/bin/cargo" ]]; then
   export RUSTUP_TOOLCHAIN="stable-aarch64-apple-darwin"
   export PATH="$CARGO_HOME/bin:$PATH"
 fi
+if ! python3 scripts/setup-vision.py --check; then
+  python3 scripts/setup-vision.py
+fi
 exec cargo run --offline -- serve "${1:-8770}"

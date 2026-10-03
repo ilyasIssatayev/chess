@@ -8,6 +8,31 @@ const cameraButton = $("#camera-button");
 const calibrateButton = $("#calibrate-button");
 const resetCalibrationButton = $("#reset-calibration-button");
 const tracker = new CameraRecorder.Tracker();
+const vision = new VisionClient();
+const personalStore = new PersonalVisionStore();
+let personalData = { samples: [], model: null, enabled: false }, personalLoaded = false;
+let lastReadout;
+let modelReady = false, modelBusy = false, visionSession = null, visionSequence = 0;
+let visionEpoch = 0, motionVersion = 0, modelDisturbed = false, lastModelAt = 0;
+const usingModel = () => $("#recognition-mode").value === "model";
+vision.ready.then(async () => {
+  modelReady = true; $("#model-status").textContent = "Piece model ready"; updateControls();
+  try {
+    personalData = await personalStore.get();
+    if (personalData.enabled && personalData.model) {
+      await vision.request("personal", { model: personalData.model });
+      $("#personal-enabled").checked = true;
+      $("#auto-record").checked = false;
+    }
+    personalLoaded = true; renderPersonal();
+  } catch (error) {
+    personalData = { samples: Array.isArray(personalData.samples) ? personalData.samples : [], model: null, enabled: false };
+    $("#personal-enabled").checked = false;
+    personalLoaded = true; $("#personal-detail").textContent = error.message;
+  }
+  updateControls();
+})
+  .catch((error) => { $("#model-status").textContent = "Model unavailable"; $("#model-detail").textContent = error.message; updateControls(); });
 let stream, animation, game, latestPatches, candidate, selectedSquare;
 let lastSample = 0, lastFrameTime = -1, lastFrameAt = 0, pending = false;
 let calibrationEditing = false, draggedCorner;
@@ -75,7 +100,11 @@ function calibrationQuality(points, width, height) {
   if (Math.min(...edges) < 45) return { valid: false, label: "Corners are too close" };
   const horizontalRatio = Math.min(edges[0], edges[2]) / Math.max(edges[0], edges[2]);
   if (horizontalRatio < 0.18) return { valid: false, label: "Viewing angle is too shallow" };
-  return { valid: true, label: horizontalRatio < 0.45 ? "Strong perspective · check occlusion" : "Tilted view calibrated" };
+  try {
+    const geometry = ChessVisionCore.geometry(corners, width, height);
+    const view = ChessVisionCore.viewQuality(geometry.project);
+    return { valid: true, label: view.compressed ? "Shallow side view · check piece bases" : horizontalRatio < 0.45 ? "Strong perspective · check occlusion" : "Tilted view calibrated" };
+  } catch (error) { return { valid: false, label: error.message }; }
 }
 
 function svgElement(name, attributes = {}) {
@@ -181,15 +210,24 @@ function highlight(squares) {
 
 function disarm(copy = "Set the physical board to match the tracked position, then set a reference.") {
   tracker.reset();
+  visionEpoch += 1; visionSession = null; visionSequence = 0; modelDisturbed = false;
   candidate = null;
   $("#position-confirm").checked = false;
+  $("#sample-confirm").checked = false;
   $("#recording-label").textContent = "Recording paused";
   if (game) setDecision("idle", "Set a reference position", copy);
   updateControls();
 }
 
 function updateControls() {
-  $("#reference-button").disabled = !game || !stream || calibrationEditing || !calibrationSaved || !latestPatches || performance.now() - lastFrameAt > 2000 || pending || !$("#position-confirm").checked;
+  const cameraReady = game && stream && !calibrationEditing && calibrationSaved && latestPatches && performance.now() - lastFrameAt <= 2000 && !pending;
+  $("#reference-button").disabled = !cameraReady || !$("#position-confirm").checked || (usingModel() && (!modelReady || modelBusy));
+  $("#read-board-button").disabled = !cameraReady || !modelReady || modelBusy || Boolean(tracker.reference);
+  $("#auto-record").disabled = !usingModel() || $("#personal-enabled").checked;
+  $("#sample-button").disabled = !cameraReady || !modelReady || modelBusy || !personalLoaded || !$("#sample-confirm").checked || personalData.samples.length >= 20;
+  $("#train-button").disabled = !modelReady || modelBusy || pending || !personalLoaded || personalData.samples.length < 3;
+  $("#clear-personal-button").disabled = modelBusy || pending || !personalLoaded || (!personalData.samples.length && !personalData.model);
+  $("#personal-enabled").disabled = !modelReady || modelBusy || pending || !personalLoaded || !personalData.model;
   $("#record-button").disabled = !game || !$("#manual-move").value || pending;
   $("#undo-button").disabled = !game?.moves.length || pending;
   $("#new-game-button").disabled = !game || pending;
@@ -244,12 +282,12 @@ function positionRequest() { return { game_id: game.game_id, revision: game.revi
 
 async function recordMove(move, automatic = false, patches) {
   if (pending || !game || !move) return;
-  pending = true; updateControls();
+  pending = true; visionEpoch += 1; updateControls();
   try {
-    game = await api("/api/game/move", { ...positionRequest(), uci: move.uci, automatic });
+    game = await api("/api/game/move", { ...positionRequest(), uci: move.uci, automatic, vision_session: move.vision_session, proposal_id: move.proposal_id });
     renderGame();
     candidate = null;
-    if (patches && tracker.reference && stream && !document.hidden && !CameraRecorder.changes(patches, latestPatches).some((e) => e.changed)) {
+    if (patches && tracker.reference && stream && !document.hidden && (!usingModel() || visionSession && move.proposal_id && game.vision_session === visionSession) && !CameraRecorder.changes(patches, latestPatches).some((e) => e.changed)) {
       tracker.setReference(patches, performance.now());
       setDecision("accepted", `${move.san} recorded`, `Saved locally. ${game.turn} to move.`, "✓", move);
     } else {
@@ -331,6 +369,7 @@ function monitorCamera(now) {
     const threshold = Number($("#sensitivity").value);
     const patches = CameraRecorder.sampleSquares(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height, homography(points));
     const moving = latestPatches && CameraRecorder.changes(latestPatches, patches, threshold / 2).some((e) => e.changed);
+    if (moving) { motionVersion += 1; modelDisturbed = true; candidate = null; $("#manual-move").value = ""; $("#sample-confirm").checked = false; }
     if (moving || !latestPatches) liveStableSince = now;
     latestPatches = patches;
     const badge = $("#motion-badge");
@@ -340,6 +379,11 @@ function monitorCamera(now) {
     $("#timing").textContent = "Preview active";
     updateControls();
     if (!game || calibrationEditing || pending || !tracker.reference) return;
+    if (usingModel()) {
+      if (settling) setDecision("moving", "Waiting for the board to settle", "Keep your hands clear while the camera reads the pieces.", "↻");
+      else if (!modelBusy && modelReady && now - lastModelAt >= 350) analyzeModel();
+      return;
+    }
     const result = tracker.ingest(patches, now, game.legal_moves, threshold);
     if (result.kind === "moving" || result.kind === "settling") {
       candidate = null;
@@ -356,7 +400,7 @@ function monitorCamera(now) {
       candidate = { ...result.matches[0], patches: result.patches };
       $("#manual-move").value = candidate.uci;
       setDecision("review", `${candidate.san} detected`, "The square changes match this legal move. Confirm it below.", "?", candidate);
-      if ($("#auto-record").checked) recordMove(candidate, true, result.patches);
+      // Change-only fallback is reviewed; automatic commits require neural evidence.
     } else {
       candidate = null;
       $("#manual-move").value = "";
@@ -369,23 +413,117 @@ function monitorCamera(now) {
   }
 }
 
-$("#reference-button").addEventListener("click", () => {
+function showModelReadout(result) {
+  lastReadout = result;
+  $("#crop-inspector").hidden = true;
+  const board = $("#recognized-board"); board.replaceChildren();
+  const evidence = Object.fromEntries(result.squares.map((square) => [square.square, square]));
+  const symbols = ["♙", "♘", "♗", "♖", "♕", "♔", "♟", "♞", "♝", "♜", "♛", "♚"];
+  const expected = Object.fromEntries(game?.pieces || []);
+  const differences = [], uncertain = [];
+  CameraRecorder.names.forEach((name, i) => {
+    const e = evidence[name], values = [e.empty_probability, ...e.piece_probabilities];
+    const index = values.indexOf(Math.max(...values));
+    const piece = index === 0 ? null : ChessVisionCore.classes[index - 1];
+    if (e.visible_probability < .5) uncertain.push(name);
+    if (game && piece !== expected[name]) differences.push(name);
+    const cell = document.createElement("button");
+    cell.type = "button"; cell.dataset.square = name;
+    cell.className = `chess-square ${(Math.floor(i / 8) + i % 8) % 2 ? "dark" : "light"} ${e.visible_probability < .5 ? "uncertain" : ""}`;
+    cell.setAttribute("aria-label", `${name} ${piece?.replaceAll("_", " ") || "empty"}${e.visible_probability < .5 ? " uncertain" : ""}`);
+    const symbol = document.createElement("span"); symbol.textContent = index === 0 ? "" : symbols[index - 1];
+    const label = document.createElement("small"); label.textContent = name;
+    cell.append(symbol, label); board.append(cell);
+  });
+  $("#model-status").textContent = result.personalized ? "Personal recognition · review" : "Piece model ready";
+  $("#model-detail").textContent = `${result.latency_ms} ms per board · ${uncertain.length} uncertain squares${differences.length ? ` · differs from tracked position at ${differences.slice(0, 12).join(", ")}${differences.length > 12 ? "…" : ""}` : " · matches the tracked position"}.${result.quality?.warning ? ` ${result.quality.warning}` : ""}${$("#personal-enabled").checked && !result.personalized ? " Personal examples use different camera geometry; the base model is active. Restore the saved camera position or collect new examples." : ""}`;
+}
+
+function observation(result, sessionId, sequence, captureTime, moving = false) {
+  return { session_id: sessionId, sequence, capture_time: Math.round(captureTime * 1000), moving,
+    calibration_version: JSON.stringify(corners), model_version: result.version, squares: result.squares };
+}
+
+async function analyzeModel(readOnly = false) {
+  if (modelBusy || !stream || !modelReady) return;
+  const epoch = visionEpoch, motion = motionVersion, captured = performance.now(), patches = latestPatches;
+  const disturbed = modelDisturbed;
+  modelBusy = true; lastModelAt = captured; updateControls();
+  try {
+    const result = await vision.infer(video, structuredClone(corners), { inspect: readOnly });
+    if (epoch !== visionEpoch || motion !== motionVersion || document.hidden || !stream || performance.now() - lastFrameAt > 2000) return;
+    showModelReadout(result);
+    if (readOnly) return;
+    if (!visionSession || !tracker.reference || pending) return;
+    const decision = await api("/api/vision/observe", { ...positionRequest(), observation: observation(result, visionSession, ++visionSequence, captured, disturbed) });
+    if (epoch !== visionEpoch || motion !== motionVersion || document.hidden || !stream) return;
+    modelDisturbed = false;
+    if (decision.kind === "candidate") {
+      const move = game.legal_moves.find((m) => m.uci === decision.uci);
+      if (!move) throw new Error("The model proposal belongs to a different tracked position.");
+      candidate = { ...move, patches, vision_session: decision.session_id, proposal_id: decision.proposal_id };
+      $("#manual-move").value = candidate.uci;
+      setDecision("review", `${candidate.san} detected`, "Piece recognition supports this legal move across three observations. Confirm it below.", "?", candidate);
+      if ($("#auto-record").checked && !result.personalized) recordMove(candidate, true, patches);
+    } else if (decision.kind === "unchanged") {
+      candidate = null; $("#manual-move").value = "";
+      setDecision("stable", "Watching the pieces", `${game.turn} to move. The camera position matches the tracked board.`, "✓");
+    } else if (decision.kind === "review") {
+      candidate = null; $("#manual-move").value = "";
+      setDecision("review", "Camera position needs review", "The model cannot identify one supported legal move. Check the camera readout, lighting and corner calibration, or enter the move manually.", "!");
+    } else {
+      candidate = null; $("#manual-move").value = "";
+      setDecision("moving", "Reading the new position", "Waiting for consistent piece recognition before recording a move.", "…");
+    }
+  } catch (error) {
+    if (epoch === visionEpoch) { disarm(); setDecision("review", "Recognition needs attention", error.message, "!"); }
+  } finally { modelBusy = false; updateControls(); }
+}
+
+$("#reference-button").addEventListener("click", async () => {
   if (!game || !stream || pending || !latestPatches || !$("#position-confirm").checked) return;
   const quality = calibrationQuality([corners.a8, corners.h8, corners.h1, corners.a1].map((p) => ({ x: p.x * viewport.clientWidth, y: p.y * viewport.clientHeight })), viewport.clientWidth, viewport.clientHeight);
   if (!quality.valid) { setDecision("review", "Check calibration", quality.label, "!"); return; }
   if (performance.now() - liveStableSince < 900) { setDecision("moving", "Wait for a stable board", "Clear your hands, then set the reference again.", "↻"); return; }
-  tracker.setReference(latestPatches, performance.now());
-  $("#recording-label").textContent = "Watching calibrated board";
+  const epoch = visionEpoch, motion = motionVersion, captured = performance.now(), patches = latestPatches;
+  if (usingModel()) {
+    if (!modelReady || modelBusy) return;
+    pending = true; modelBusy = true; updateControls();
+    setDecision("moving", "Verifying the reference position", "Reading all 64 squares before recording starts.", "…");
+    try {
+      const result = await vision.infer(video, structuredClone(corners));
+      if (epoch !== visionEpoch || motion !== motionVersion || !stream || document.hidden) throw new Error("The board changed during verification. Clear your hands and try again.");
+      showModelReadout(result);
+      const id = crypto.randomUUID();
+      await api("/api/vision/reference", { ...positionRequest(), observation: observation(result, id, 0, captured) });
+      if (epoch !== visionEpoch || motion !== motionVersion || !stream || document.hidden) throw new Error("The camera changed during verification. Set a fresh reference.");
+      visionSession = id; visionSequence = 0; modelDisturbed = false;
+    } catch (error) {
+      if (epoch === visionEpoch) { disarm(); setDecision("review", "Reference could not be verified", error.message, "!"); }
+      return;
+    } finally { pending = false; modelBusy = false; updateControls(); }
+  }
+  tracker.setReference(patches, performance.now());
+  $("#recording-label").textContent = usingModel() ? "Watching with piece recognition" : "Watching square changes for review";
   $("#manual-move").value = "";
-  setDecision("stable", "Watching for a move", `${game.turn} to move. Move one piece, then let the board settle.`, "✓");
+  setDecision("stable", "Watching for a move", `${game.turn} to move. Play one move, then let the board settle.`, "✓");
   updateControls();
+});
+$("#read-board-button").addEventListener("click", () => {
+  if (performance.now() - liveStableSince < 900) { setDecision("moving", "Wait for a stable board", "Keep your hands clear, then read the board again.", "↻"); return; }
+  $("#camera-readout").open = true;
+  analyzeModel(true);
+});
+$("#recognition-mode").addEventListener("change", () => {
+  if (!usingModel()) $("#auto-record").checked = false;
+  disarm("Recognition mode changed. Set a fresh reference.");
 });
 
 $("#position-confirm").addEventListener("change", updateControls);
 $("#sensitivity").addEventListener("change", () => disarm("Detection sensitivity changed. Set a fresh reference."));
 $("#record-button").addEventListener("click", () => {
   const uci = $("#manual-move").value;
-  recordMove(game?.legal_moves.find((move) => move.uci === uci), false, candidate?.uci === uci ? candidate.patches : undefined);
+  recordMove(candidate?.uci === uci ? candidate : game?.legal_moves.find((move) => move.uci === uci), false, candidate?.uci === uci ? candidate.patches : undefined);
 });
 $("#manual-move").addEventListener("change", () => { if (tracker.reference) disarm("Manual review selected. Record the move, then set a fresh reference."); updateControls(); });
 $("#tracked-board").addEventListener("click", (event) => {
@@ -427,3 +565,89 @@ cameraButton.addEventListener("click", toggleCamera);
 renderCalibration();
 updateControls();
 api().then((value) => { game = value; renderGame(); disarm(); }).catch((error) => setDecision("review", "Recorder connection needed", error.message, "!"));
+
+function renderPersonal() {
+  const positions = new Set(personalData.samples.map((s) => s.position)).size;
+  $("#personal-detail").textContent = `${personalData.samples.length}/20 examples · ${positions} different positions. Neural features stay in this browser; photos are not saved. Changing the camera angle requires new examples.`;
+  const m = personalData.model?.metrics;
+  $("#personal-validation").textContent = m ? `On ${m.validationFrames} held-out photo(s) of one position: personal recognition ${m.correct}/${m.count} squares; base model ${m.baselineCorrect}/${m.count}. This is a small local check, not a general accuracy estimate.${m.errors.length ? ` Check ${m.errors.join(", ")}.` : ""} Review each suggested move.` : "The last position will be reserved for validation before the final head is trained on all examples.";
+}
+
+$("#sample-confirm").addEventListener("change", updateControls);
+$("#sample-button").addEventListener("click", async () => {
+  if (!stream || !game || pending || modelBusy || !$("#sample-confirm").checked) return;
+  if (performance.now() - liveStableSince < 900) { $("#personal-detail").textContent = "Wait until the board is stable, then confirm and save again."; return; }
+  // Keep the label snapshot fixed for the whole asynchronous capture.
+  const position = game.fen.split(" ")[0], pieces = Object.fromEntries(game.pieces), motion = motionVersion;
+  disarm("Collecting a piece-set example. Set a fresh reference before recording.");
+  const epoch = visionEpoch;
+  pending = true; modelBusy = true; updateControls();
+  try {
+    const result = await vision.infer(video, structuredClone(corners), { sample: true, inspect: true, position, pieces });
+    if (epoch !== visionEpoch || motion !== motionVersion || !stream || document.hidden || performance.now() - lastFrameAt > 2000) throw new Error("The board changed during capture. Clear your hands and save again.");
+    const sample = result.sample;
+    if (sample.coverage.some((c, i) => c < .9 && sample.labels[i] >= 0)) throw new Error("Some labelled pieces are clipped by the camera frame. Check the crop inspector and move the camera back or higher.");
+    if (personalData.samples.length && personalData.samples[0].calibration !== sample.calibration) throw new Error("The camera calibration differs from saved examples. Restore it or clear the old examples first.");
+    const next = { ...personalData, samples: [...personalData.samples, sample] };
+    await personalStore.set(next); personalData = next;
+    showModelReadout(result); $("#camera-readout").open = true; renderPersonal();
+  } catch (error) { $("#personal-detail").textContent = error.message; }
+  finally { pending = false; modelBusy = false; updateControls(); }
+});
+
+$("#train-button").addEventListener("click", async () => {
+  if (pending || modelBusy || personalData.samples.length < 3) return;
+  disarm("Personal recognition changed. Read the board, then set a fresh reference.");
+  pending = true; modelBusy = true; updateControls();
+  $("#personal-detail").textContent = "Training two small heads on local neural features and checking a held-out position…";
+  try {
+    const model = await vision.request("train", { samples: personalData.samples });
+    const next = { ...personalData, model, enabled: false };
+    await personalStore.set(next);
+    await vision.request("personal", { model: null });
+    personalData = next; $("#personal-enabled").checked = false; renderPersonal();
+  } catch (error) { $("#personal-detail").textContent = error.message; }
+  finally { pending = false; modelBusy = false; updateControls(); }
+});
+
+$("#personal-enabled").addEventListener("change", async () => {
+  const enabled = $("#personal-enabled").checked;
+  disarm("Recognition model changed. Read the camera position, then set a fresh reference.");
+  pending = true; updateControls();
+  $("#auto-record").checked = false;
+  try {
+    await vision.request("personal", { model: enabled ? personalData.model : null });
+    const next = { ...personalData, enabled };
+    await personalStore.set(next); personalData = next; renderPersonal();
+  } catch (error) {
+    await vision.request("personal", { model: null }).catch(() => {});
+    personalData.enabled = false; $("#personal-enabled").checked = false; $("#personal-detail").textContent = error.message;
+  } finally { pending = false; updateControls(); }
+});
+
+$("#clear-personal-button").addEventListener("click", async () => {
+  if (pending || modelBusy) return;
+  pending = true; disarm("Personal examples cleared. Set a fresh reference with the base model."); updateControls();
+  try {
+    const next = { samples: [], model: null, enabled: false };
+    await personalStore.set(next); await vision.request("personal", { model: null });
+    personalData = next; $("#personal-enabled").checked = false; renderPersonal();
+  } catch (error) { $("#personal-detail").textContent = error.message; }
+  finally { pending = false; updateControls(); }
+});
+
+$("#recognized-board").addEventListener("click", (event) => {
+  const name = event.target.closest("[data-square]")?.dataset.square;
+  if (!name || !lastReadout) return;
+  const preview = lastReadout.previews?.find((p) => p.square === name);
+  if (!preview) { $("#model-detail").textContent = "Pause recording and click Read camera position to inspect all 64 crops."; return; }
+  for (const [selector, rgb, width, height] of [["#occupancy-crop", preview.occupancy, 100, 100], ["#piece-crop", preview.rgb, 100, 200]]) {
+    const target = $(selector), ctx = target.getContext("2d"), data = ctx.createImageData(width, height);
+    for (let i = 0; i < width * height; i += 1) { data.data.set(rgb.subarray(i * 3, i * 3 + 3), i * 4); data.data[i * 4 + 3] = 255; }
+    ctx.putImageData(data, 0, 0);
+  }
+  const evidence = lastReadout.squares.find((e) => e.square === name);
+  const top = [{ label: "empty", probability: evidence.empty_probability }, ...ChessVisionCore.classes.map((label, i) => ({ label: label.replaceAll("_", " "), probability: evidence.piece_probabilities[i] }))].sort((a, b) => b.probability - a.probability).slice(0, 3);
+  $("#crop-detail").textContent = `${name} · ${Math.round(preview.coverage * 100)}% crop inside frame. ${top.map((p) => `${p.label}: ${Math.round(p.probability * 100)}%`).join("; ")}. These scores do not measure whether another piece blocks the view.`;
+  $("#crop-inspector").hidden = false;
+});

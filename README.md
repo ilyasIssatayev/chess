@@ -7,6 +7,7 @@ The implementation currently provides:
 - an AVFoundation camera feasibility probe with permission, device, format, frame, and cadence reporting;
 - shared observation, move, timing, evidence, and review contracts;
 - legal UCI move application with canonical SAN/FEN through `cozy-chess`;
+- local neural occupancy/piece recognition in a browser worker, with model-verified references and a camera readout;
 - a conservative temporal decoder that compares unchanged and legal-successor positions;
 - validated four-corner projective geometry for manual board calibration;
 - transactional SQLite game/event/move storage;
@@ -58,7 +59,9 @@ The accepted workspace, persistence, result, and provisional timestamp choices
 are recorded in the [Phase 1 decisions](docs/phase-1-decisions.md).
 
 The [local browser recorder](apps/recorder-ui-prototype/README.md) now connects
-calibrated camera square changes to Rust legal moves, review, SQLite persistence,
-undo and PGN export. Start it with `./scripts/start-recorder.sh` and open
-<http://localhost:8770/>. Physical-board recognition is an experimental baseline
-and still needs qualification before production Tauri integration.
+local pretrained piece-recognition models to Rust temporal/legal move decoding,
+review, SQLite persistence, undo and PGN export. Start it with `./scripts/start-recorder.sh` and open
+<http://localhost:8770/>. Physical-board recognition uses pretrained photo models
+with optional browser-local classifier heads taught from confirmed positions.
+The crop inspector and side-view diagnostics help check camera setup. Recognition
+still needs qualification on the user's board before production Tauri integration.

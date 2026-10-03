@@ -1,0 +1,97 @@
+{
+  "version": "crisp-photo-4690fd5418ff-crops-v2",
+  "source": "https://huggingface.co/cstr/chess-board-photo-onnx",
+  "source_revision": "4690fd5418ff7c405a76d1c156077ecd865ac053",
+  "license": "MIT",
+  "preprocessing_source": "https://github.com/CrispStrobe/CrispChess/tree/f029a319e35ce018936fc620dbf35a656a409b84/lib/vision/photo",
+  "models": [
+    {
+      "file": "occupancy.onnx",
+      "url": "https://huggingface.co/cstr/chess-board-photo-onnx/resolve/4690fd5418ff7c405a76d1c156077ecd865ac053/board_photo_occupancy.onnx",
+      "sha256": "00680796bd971217114641d9a07a54f4fd0a601b7ffe0c3141fb00a559514217",
+      "bytes": 6094073,
+      "source_bytes": 6094010,
+      "source_sha256": "dcafa86708036f1c50d2471bcfef838a3973e63bc6e3eef08dd3adccf6e0067d"
+    },
+    {
+      "file": "pieces.onnx",
+      "url": "https://huggingface.co/cstr/chess-board-photo-onnx/resolve/4690fd5418ff7c405a76d1c156077ecd865ac053/board_photo_pieces.onnx",
+      "sha256": "dd754c1075e86718e3eb02747196fea240a89f067e33a17d281928c3bd6a7c21",
+      "bytes": 6135076,
+      "source_bytes": 6135013,
+      "source_sha256": "79f7833e4fd802eb10de4d2765bb243ec51c40bb5097989af9ff4db789f2a8af"
+    }
+  ],
+  "runtime": {
+    "version": "1.23.2",
+    "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.23.2.tgz",
+    "integrity": "sha512-T09JUtMn+CZLk3mFwqiH0lgQf+4S7+oYHHtk6uhaYAAJI95bTcKi5bOOZYwORXfS/RLZCjDDEXGWIuOCAFlEjg==",
+    "files": [
+      {
+        "file": "ort.wasm.min.mjs",
+        "member": "package/dist/ort.wasm.min.mjs",
+        "sha256": "69751720f611e37d1ce2fa3c6ebaa80f949014752636c5f8887a63d40feadcc7",
+        "bytes": 49856
+      },
+      {
+        "file": "ort-wasm-simd-threaded.mjs",
+        "member": "package/dist/ort-wasm-simd-threaded.mjs",
+        "sha256": "90a557d15c02bac4504d95b67f431d8594635ed2a0a62a7f2cd83d090ff91d3e",
+        "bytes": 20321
+      },
+      {
+        "file": "ort-wasm-simd-threaded.wasm",
+        "member": "package/dist/ort-wasm-simd-threaded.wasm",
+        "sha256": "45eaee27761ad883742a8d4b8fce1538d60ce43b51adf1726fafccc59b8c1a15",
+        "bytes": 11905541
+      }
+    ]
+  },
+  "input": {
+    "occupancy": [
+      null,
+      3,
+      100,
+      100
+    ],
+    "pieces": [
+      null,
+      3,
+      200,
+      100
+    ],
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ]
+  },
+  "occupancy_classes": [
+    "empty",
+    "occupied"
+  ],
+  "piece_classes": [
+    "black_bishop",
+    "black_king",
+    "black_knight",
+    "black_pawn",
+    "black_queen",
+    "black_rook",
+    "white_bishop",
+    "white_king",
+    "white_knight",
+    "white_pawn",
+    "white_queen",
+    "white_rook"
+  ],
+  "features": {
+    "tensor": "/classifier/classifier.1/Mul_output_0",
+    "dimension": 1024,
+    "method": "frozen-penultimate-v1"
+  }
+}

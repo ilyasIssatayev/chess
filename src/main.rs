@@ -9,6 +9,7 @@ use recorder_core::{DecoderConfig, DecoderDecision, TemporalDecoder};
 use storage::Store;
 
 mod server;
+mod vision;
 
 fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("serve") {

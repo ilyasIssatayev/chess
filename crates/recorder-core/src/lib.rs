@@ -155,6 +155,15 @@ impl TemporalDecoder {
         &self.state
     }
 
+    /// Withdraw uncommitted evidence when the board changes during review.
+    /// Keep the stream identity and last trusted position/time intact.
+    pub fn invalidate_candidate(&mut self) {
+        self.pending = None;
+        self.awaiting = None;
+        self.stable_since = None;
+        self.state = RecorderState::Disturbed;
+    }
+
     pub fn ingest(
         &mut self,
         game: &ChessGame,

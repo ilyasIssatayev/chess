@@ -49,6 +49,7 @@
           <div><span>Board visibility</span><strong id="visibility">Waiting</strong></div>
           <div><span>Frame timing</span><strong id="timing">Waiting</strong></div>
           <div><span>Calibration</span><strong id="calibration">Set board corners first</strong></div>
+          <div><span>Recognition</span><strong id="model-status">Loading piece model…</strong></div>
         </div>
       </div>
 
@@ -60,12 +61,38 @@
         <button id="reference-button" disabled>Set reference position</button>
       </div>
       <div class="recording-setup">
+        <label for="recognition-mode">Recognition <select id="recognition-mode"><option value="model">Piece recognition</option><option value="changes">Square changes · manual review</option></select></label>
+        <button id="read-board-button" disabled>Read camera position</button>
         <label><input type="checkbox" id="position-confirm"> The physical board matches the tracked position and all squares are visible.</label>
         <span id="recording-label">Recording paused</span>
-        <label><input type="checkbox" id="auto-record"> Automatically record unique matches (experimental)</label>
+        <label><input type="checkbox" id="auto-record"> Automatically record model-supported moves (experimental)</label>
         <label for="sensitivity">Change threshold <input id="sensitivity" type="range" min="6" max="24" value="10"> <span>Lower detects smaller changes</span></label>
       </div>
     </section>
+    <details class="panel camera-readout" id="camera-readout">
+      <summary>Camera model readout</summary>
+      <p id="model-detail">Read the camera position to inspect what the model sees.</p>
+      <div id="recognized-board" class="tracked-board" aria-label="Position recognized by the camera"></div>
+      <p>Click a square to inspect the images sent to the model. Neighboring pieces or a clipped piece in the crop can explain an incorrect identity.</p>
+      <div class="crop-inspector" id="crop-inspector" hidden>
+        <div><span>Square footprint</span><canvas id="occupancy-crop" width="100" height="100"></canvas></div>
+        <div><span>Piece crop</span><canvas id="piece-crop" width="100" height="200"></canvas></div>
+        <p id="crop-detail"></p>
+      </div>
+    </details>
+    <details class="panel camera-readout" id="personal-setup">
+      <summary>Teach recognition your pieces</summary>
+      <p>Keep the camera fixed. Match the physical board to the tracked position, clear your hands, then save an example. Record a move manually and save another. Use at least three different positions with every piece type visible.</p>
+      <label><input type="checkbox" id="sample-confirm"> I checked that the physical position matches the tracked board and the pieces are unobstructed.</label>
+      <div class="control-group personal-actions">
+        <button id="sample-button" disabled>Save position example</button>
+        <button id="train-button" disabled>Train personal recognition</button>
+        <button id="clear-personal-button" disabled>Clear examples</button>
+      </div>
+      <label><input type="checkbox" id="personal-enabled" disabled> Use personal recognition · review each move</label>
+      <p id="personal-detail" aria-live="polite">Examples stay in this browser. Camera photos are not saved.</p>
+      <p id="personal-validation"></p>
+    </details>
     <section class="controls panel review-controls" aria-label="Move review">
       <div class="manual-entry">
         <label for="manual-move">Detected or manually selected move</label>
@@ -77,7 +104,7 @@
         <button id="export-button" disabled>Export PGN</button>
         <button id="new-game-button" disabled>New game</button>
       </div>
-      <p>Camera changes suggest legal moves; confirm the actual move when uncertain. Games save locally. Starting a new game keeps the previous game in the database.</p>
+      <p>Piece recognition suggests legal moves; confirm the actual move when uncertain. Games save locally. Starting a new game keeps the previous game in the database.</p>
     </section>
       </div>
       <aside class="side-column">
@@ -112,6 +139,9 @@
   </main>
   <canvas id="motion-canvas" width="640" height="360" hidden></canvas>
   <script src="recorder.js"></script>
+  <script src="vision-core.js"></script>
+  <script src="vision-client.js"></script>
+  <script src="vision-store.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

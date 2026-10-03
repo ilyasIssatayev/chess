@@ -88,3 +88,124 @@ errors appeared. Visual inspection caught and corrected unequal tracked-board
 row heights. The user recorder is left running on localhost:8770 with its own
 untouched game database; the old static preview on port 8765 has no recorder API.
 The physical camera/move workflow still needs user-board validation.
+
+
+## 3 October — Neural camera move recognition
+
+Installed two pretrained MobileNetV3-Small physical-photo classifiers from
+`cstr/chess-board-photo-onnx`, pinned at revision
+`4690fd5418ff7c405a76d1c156077ecd865ac053`, plus verified ONNX Runtime Web 1.23.2.
+Their hashes, input shapes, class order and provenance are recorded in
+`models/vision-manifest.json` and `models/NOTICE.md`. The setup script checks
+hashes and installs immutable assets in ignored local storage; startup is
+offline after installation.
+
+Added image-order projective warping and the published chesscog-compatible
+occupancy/identity crops, asymmetric height/width margins, left-half mirroring,
+black padding, RGB ImageNet normalization and explicit model-to-contract class
+mapping. A browser module worker executes the actual neural graphs off the UI
+thread. Camera images remain in the browser; normalized 64-square evidence
+reaches the existing Rust temporal/legal-position decoder through local API
+routes. No piece type, king location or engine preference is forced into model
+outputs.
+
+The default UI now selects piece recognition, reports graph readiness, provides
+an independently recognized board readout, and verifies the tracked reference
+before arming. Three consistent neural successor observations are required.
+Automatic commits require a current supported proposal and matching session;
+contradictory evidence or motion during review withdraws the uncommitted
+proposal. Manual moves/corrections and capture discontinuities invalidate the
+neural session. The pixel-change path remains an explicit review-only fallback.
+
+Checks: all **96 Rust workspace tests**, strict Clippy, **8 neural preprocessing
+regressions**, and the existing **8 pixel/temporal regressions** pass. Neural API
+integration tests cover actual automatic commit authorization, save/next-turn
+continuity, wrong setup, malformed probabilities, weak evidence, stale
+proposals, motion/contradictions during review, hidden two-move gaps and manual
+correction recovery. Browser execution of both ONNX graphs succeeded; the
+licensed real-photo fixture matched **64/64 squares** with no uncertain squares
+at **225–237 ms** per board in the two checks. Sending that photo's actual model
+evidence to the Rust reference endpoint correctly rejected it as a standard
+starting-position reference. Main app startup shows **Piece model ready**, the
+existing game is preserved, and browser console checks are clean. The test
+server/data are isolated; the main recorder is running on localhost:8770.
+
+This advances F07/F08/F09/F15 integration, but does not pass physical accuracy
+gates. The fixture is from the model author's corpus and is a preprocessing /
+runtime regression, not an independent evaluation on the user's board.
+Weights are pretrained and have not been fine-tuned on the user's piece set.
+Crop coverage and model certainty are evidence-quality proxies, not a learned
+occlusion detector or calibrated accuracy estimates. Independent F02 recordings,
+real-board move sequences and timing qualification remain outstanding.
+
+## Side-camera diagnostics and local piece-set adaptation (2026-10-03)
+
+User reported frequent identity errors with a side camera and authorized continued
+project work while away. The pretrained photo classifier had only been checked
+on a largely overhead public fixture, so the earlier result did not qualify the
+user's setup. The current work adds an actionable adaptation path without claiming
+an out-of-the-box side-view accuracy improvement.
+
+- Added per-square crop inspection after a camera read: occupancy footprint,
+  asymmetric identity crop, top-three scores and in-frame crop coverage. Shallow
+  projection and low-resolution warnings help distinguish camera/crop problems
+  from piece-classification problems. These warnings do not detect occlusion.
+- Exposed the existing frozen 1024-dimensional penultimate activation in each
+  pinned MIT MobileNet ONNX graph. Original graph weights/logits are unchanged;
+  original downloads and transformed files have separately pinned hashes. The
+  normal installer remains Python-standard-library-only. ONNX 1.19.1's checker
+  validated the derivative graphs during development.
+- Added **Teach recognition your pieces**: explicit confirmation of the physical
+  position, stable-frame capture of neural features and labels, up to 20 examples,
+  and regularized class-balanced softmax-head training entirely in the browser
+  worker. Neither camera images nor crop images persist. Examples and heads are
+  saved in IndexedDB for the local browser origin.
+- Training requires at least three distinct piece placements, a fixed camera
+  calibration and two visible examples of every piece class in the learning split.
+  Every frame of the last position is held out for a base/personal comparison;
+  only afterward are final heads fitted on all examples. The small validation
+  score is explicitly not a general accuracy estimate.
+- Personal heads use a content digest, exact base-model identity, labelled corners
+  and processed frame dimensions. Saved head integrity and finite shapes are
+  checked. Changed crop geometry uses the base classifier and explains why.
+  Physical camera movement without changed settings remains undetectable and
+  requires new examples. Personal proposals require reviewed commits in both
+  UI and Rust; a valid proposal token cannot authorize automatic personal moves.
+
+Validation:
+
+- 98 Rust workspace tests pass, including personal-model identity changes,
+  rejection of automatic personal commits and successful reviewed commits.
+  Clippy passes with warnings denied.
+- 23 JavaScript tests pass: 10 preprocessing/geometry, 5 personal-head training
+  and leakage/invalid-data regressions, and 8 recorder motion/move regressions.
+- Browser execution of the modified graphs still recognizes 64/64 squares of the
+  existing licensed public photo. Ordinary inference measured 230 ms; inspecting
+  all 64 identity crops/features measured 449 ms. Finite 1024-dimensional features,
+  all 64 crop previews and typed feature persistence/restoration were verified.
+- The isolated browser personal-head integration check passed: synthetic-feature
+  training (645 ms for three frames), validation, save/restore, content-integrity
+  rejection, activation, changed-calibration deactivation and base restoration.
+  These synthetic checks establish plumbing, not camera recognition accuracy.
+- Verified installer migration from the exact original source hashes to the
+  derived graph hashes using isolated temporary assets and no network. Checked
+  Python syntax and whitespace. A 20-frame synthetic feature training benchmark
+  completed in 4.1 seconds in JavaScriptCore.
+
+The user's side-view camera was unavailable during this work. Their physical
+accuracy, crop quality, held-out performance and complete-game reliability remain
+unqualified. Next: collect confirmed examples with the camera fixed, inspect
+occluded/misidentified crops, compare the personal head on an independent position,
+and record independent games for F02 qualification. Full backbone fine-tuning,
+learned occlusion detection and a second camera remain possible subsequent work.
+
+## 3 October — Fail closed after rejected neural observations
+
+An invalid observation after a model proposal could leave its approval token in
+the server session. The recorder now discards that session when observation
+validation or stream decoding fails, so a sequence gap cannot be followed by an
+automatic commit using the earlier proposal. A server regression covers the
+proposal, rejected gap, stale commit and unchanged journal. The full Rust
+workspace suite, strict Clippy, formatting, all 23 JavaScript regressions and
+`git diff --check` pass with the local toolchain. Physical-board qualification
+remains the next gate; no side-view accuracy result was measured in this run.

@@ -5,9 +5,13 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::vision::{MANIFEST, VisionSession};
 use anyhow::{Context, Result, bail, ensure};
 use chess_core::ChessGame;
-use contracts::{CaptureTimeUs, GameId, MoveProvenance, MoveRecord, MoveTiming, TimingQuality};
+use contracts::{
+    CaptureTimeUs, FrameObservation, GameId, MoveProvenance, MoveRecord, MoveTiming, SessionId,
+    TimingQuality,
+};
 use export::{PgnMetadata, to_pgn};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -52,6 +56,7 @@ pub fn run() -> Result<()> {
 struct App {
     store: Store,
     game_id: GameId,
+    vision: Option<VisionSession>,
 }
 
 #[derive(Deserialize)]
@@ -62,6 +67,10 @@ struct MoveRequest {
     uci: String,
     #[serde(default)]
     automatic: bool,
+    #[serde(default)]
+    vision_session: Option<SessionId>,
+    #[serde(default)]
+    proposal_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +78,13 @@ struct PositionRequest {
     game_id: GameId,
     revision: u32,
     expected_ply: usize,
+}
+
+#[derive(Deserialize)]
+struct VisionRequest {
+    #[serde(flatten)]
+    position: PositionRequest,
+    observation: FrameObservation,
 }
 
 impl App {
@@ -81,7 +97,11 @@ impl App {
                 id
             }
         };
-        Ok(Self { store, game_id })
+        Ok(Self {
+            store,
+            game_id,
+            vision: None,
+        })
     }
 
     fn snapshot(&self) -> Result<Value> {
@@ -103,10 +123,55 @@ impl App {
         }).collect::<Vec<_>>();
         Ok(json!({
             "game_id": self.game_id, "revision": replay.revision,
+            "vision_session": self.vision.as_ref().map(|session| session.id),
             "fen": game.fen(), "moves": replay.moves, "legal_moves": legal,
             "pieces": before, "turn": if game.fen().split_whitespace().nth(1) == Some("w") { "White" } else { "Black" },
             "status": format!("{:?}", game.status()),
         }))
+    }
+
+    fn trusted_position(&self, request: &PositionRequest) -> Result<ChessGame> {
+        let replay = self.store.replay_active_game(self.game_id)?;
+        ensure!(
+            request.game_id == self.game_id
+                && request.revision == replay.revision
+                && request.expected_ply == replay.moves.len(),
+            "The tracked position changed. Reload and set a fresh reference."
+        );
+        let mut game = ChessGame::from_fen(&replay.initial_fen)?;
+        game.rebuild(
+            &replay
+                .moves
+                .iter()
+                .map(|m| m.uci.clone())
+                .collect::<Vec<_>>(),
+        )?;
+        Ok(game)
+    }
+
+    fn begin_vision(&mut self, request: VisionRequest) -> Result<Value> {
+        let game = self.trusted_position(&request.position)?;
+        // Clear any previous proposal even when a new reference fails.
+        self.vision = None;
+        let session = VisionSession::begin(&game, request.observation)?;
+        let id = session.id;
+        self.vision = Some(session);
+        Ok(json!({"kind": "reference", "session_id": id}))
+    }
+
+    fn observe_vision(&mut self, request: VisionRequest) -> Result<Value> {
+        let game = self.trusted_position(&request.position)?;
+        // A rejected observation may indicate a dropped frame, model change, or
+        // malformed evidence. None of its earlier proposals may remain usable.
+        let mut session = self
+            .vision
+            .take()
+            .context("Set a model-verified reference first.")?;
+        let result = session.observe(&game, request.observation);
+        if result.is_ok() {
+            self.vision = Some(session);
+        }
+        result
     }
 
     fn apply_move(&mut self, request: MoveRequest) -> Result<Value> {
@@ -137,7 +202,33 @@ impl App {
                 .map(|m| m.uci.clone())
                 .collect::<Vec<_>>(),
         )?;
+        let model_approved = self.vision.as_ref().is_some_and(|session| {
+            session.approves(
+                &request.uci,
+                request.vision_session,
+                request.proposal_id.as_deref(),
+            )
+        });
+        ensure!(
+            !request.automatic || model_approved,
+            "Automatic recording requires a current model-supported move. Set a fresh reference or review the move manually."
+        );
+        ensure!(
+            !request.automatic
+                || self
+                    .vision
+                    .as_ref()
+                    .is_some_and(VisionSession::allows_automatic),
+            "Personal recognition requires review. Confirm and record the suggested move manually."
+        );
         let applied = game.play_uci(&request.uci)?.clone();
+        let next_vision = if model_approved {
+            let mut session = self.vision.clone().unwrap();
+            session.commit(&game)?;
+            Some(session)
+        } else {
+            None
+        };
         let record = MoveRecord {
             game_id: self.game_id,
             revision: replay.revision,
@@ -169,6 +260,7 @@ impl App {
             &record,
             utc_us(),
         )?;
+        self.vision = next_vision;
         self.snapshot()
     }
 
@@ -181,6 +273,7 @@ impl App {
             "The position changed. Refresh the page."
         );
         ensure!(!replay.moves.is_empty(), "There is no move to undo.");
+        self.vision = None;
         self.store.apply_correction(&CorrectionRevision {
             game_id: self.game_id,
             parent_revision: replay.revision,
@@ -198,6 +291,7 @@ impl App {
         self.store
             .create_game(id, ChessGame::standard().initial_fen(), utc_us())?;
         self.game_id = id;
+        self.vision = None;
         self.snapshot()
     }
 
@@ -269,6 +363,12 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
     }
     let value = match (method.as_str(), path.as_str()) {
         ("GET", "/api/game") => Some(app.snapshot()?),
+        ("POST", "/api/vision/reference") => {
+            Some(app.begin_vision(serde_json::from_slice(&body)?)?)
+        }
+        ("POST", "/api/vision/observe") => {
+            Some(app.observe_vision(serde_json::from_slice(&body)?)?)
+        }
         ("POST", "/api/game/move") => Some(app.apply_move(serde_json::from_slice(&body)?)?),
         ("POST", "/api/game/undo") => Some(app.undo(serde_json::from_slice(&body)?)?),
         ("POST", "/api/game/new") => Some(app.new_game()?),
@@ -290,6 +390,64 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
             &serde_json::to_vec(&value)?,
         );
     }
+    if method == "GET" {
+        if std::env::var_os("CHESS_RECORDER_TEST_MODE").is_some() {
+            if path == "/vision-smoke.html" {
+                return respond(
+                    stream,
+                    200,
+                    "text/html",
+                    &std::fs::read(Path::new(UI).join("tests/vision-smoke.html"))?,
+                );
+            }
+            if path == "/vision-fixture.jpg" {
+                return respond(
+                    stream,
+                    200,
+                    "image/jpeg",
+                    &std::fs::read(
+                        Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("local-data/vision/tests/fixture.jpg"),
+                    )?,
+                );
+            }
+        }
+        if path == "/vision-assets/manifest.json" {
+            return respond(stream, 200, "application/json", MANIFEST.as_bytes());
+        }
+        let model_asset = match path.as_str() {
+            "/vision-assets/occupancy.onnx" => {
+                Some(("models/occupancy.onnx", "application/octet-stream"))
+            }
+            "/vision-assets/pieces.onnx" => {
+                Some(("models/pieces.onnx", "application/octet-stream"))
+            }
+            "/vision-assets/ort.wasm.min.mjs" => {
+                Some(("runtime/ort.wasm.min.mjs", "text/javascript"))
+            }
+            "/vision-assets/ort-wasm-simd-threaded.mjs" => {
+                Some(("runtime/ort-wasm-simd-threaded.mjs", "text/javascript"))
+            }
+            "/vision-assets/ort-wasm-simd-threaded.wasm" => {
+                Some(("runtime/ort-wasm-simd-threaded.wasm", "application/wasm"))
+            }
+            _ => None,
+        };
+        if let Some((file, mime)) = model_asset {
+            let asset = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("local-data/vision")
+                .join(file);
+            return match std::fs::read(asset) {
+                Ok(bytes) => respond(stream, 200, mime, &bytes),
+                Err(_) => respond(
+                    stream,
+                    404,
+                    "application/json",
+                    br#"{"error":"Vision asset missing. Run python3 scripts/setup-vision.py"}"#,
+                ),
+            };
+        }
+    }
     let asset = match path.as_str() {
         "/" | "/apps/recorder-ui-prototype/" | "/apps/recorder-ui-prototype/index.html" => {
             Some(("index.html", "text/html"))
@@ -298,6 +456,19 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
             Some(("styles.css", "text/css"))
         }
         "/app.js" | "/apps/recorder-ui-prototype/app.js" => Some(("app.js", "text/javascript")),
+        "/vision-core.js" | "/apps/recorder-ui-prototype/vision-core.js" => {
+            Some(("vision-core.js", "text/javascript"))
+        }
+        "/vision-client.js" | "/apps/recorder-ui-prototype/vision-client.js" => {
+            Some(("vision-client.js", "text/javascript"))
+        }
+        "/vision-worker.js" => Some(("vision-worker.js", "text/javascript")),
+        "/vision-personal.js" | "/apps/recorder-ui-prototype/vision-personal.js" => {
+            Some(("vision-personal.js", "text/javascript"))
+        }
+        "/vision-store.js" | "/apps/recorder-ui-prototype/vision-store.js" => {
+            Some(("vision-store.js", "text/javascript"))
+        }
         "/recorder.js" | "/apps/recorder-ui-prototype/recorder.js" => {
             Some(("recorder.js", "text/javascript"))
         }
@@ -337,7 +508,238 @@ mod tests {
             expected_ply: state["moves"].as_array().unwrap().len(),
             uci: uci.into(),
             automatic: false,
+            vision_session: None,
+            proposal_id: None,
         }
+    }
+
+    fn neural_observation(
+        game: &ChessGame,
+        id: SessionId,
+        sequence: u64,
+        moving: bool,
+    ) -> FrameObservation {
+        FrameObservation {
+            session_id: id,
+            sequence,
+            capture_time: CaptureTimeUs::new(sequence as i64 * 500_000).unwrap(),
+            moving,
+            calibration_version: "api-test-corners".into(),
+            model_version: crate::vision::MODEL_VERSION.into(),
+            squares: game
+                .piece_classes()
+                .iter()
+                .map(|(square, piece)| {
+                    let mut probabilities = [0.00001; 12];
+                    let empty = match piece {
+                        Some(piece) => {
+                            probabilities[piece.index()] = 0.99988;
+                            0.00001
+                        }
+                        None => 0.99988,
+                    };
+                    contracts::SquareEvidence {
+                        square: square.clone(),
+                        visible_probability: 1.0,
+                        empty_probability: empty,
+                        piece_probabilities: probabilities,
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    fn vision_request(app: &App, observation: FrameObservation) -> VisionRequest {
+        let state = app.snapshot().unwrap();
+        VisionRequest {
+            position: PositionRequest {
+                game_id: app.game_id,
+                revision: state["revision"].as_u64().unwrap() as u32,
+                expected_ply: state["moves"].as_array().unwrap().len(),
+            },
+            observation,
+        }
+    }
+
+    #[test]
+    fn personal_neural_proposals_require_review_even_with_a_valid_token() {
+        let mut app = App::open(Store::open_in_memory().unwrap()).unwrap();
+        let id = SessionId::new();
+        let version = format!(
+            "{}:personal:{}",
+            crate::vision::MODEL_VERSION,
+            "a".repeat(64)
+        );
+        let game = ChessGame::standard();
+        let mut reference = neural_observation(&game, id, 0, false);
+        reference.model_version = version.clone();
+        app.begin_vision(vision_request(&app, reference)).unwrap();
+        let mut after = game.clone();
+        after.play_uci("e2e4").unwrap();
+        let mut decision = Value::Null;
+        for sequence in [1, 2, 3] {
+            let mut frame = neural_observation(&after, id, sequence, false);
+            frame.model_version = version.clone();
+            decision = app.observe_vision(vision_request(&app, frame)).unwrap();
+        }
+        assert_eq!(decision["kind"], "candidate");
+        let mut automatic = request(&app, "e2e4");
+        automatic.automatic = true;
+        automatic.vision_session = Some(id);
+        automatic.proposal_id = decision["proposal_id"].as_str().map(str::to_owned);
+        assert!(
+            app.apply_move(automatic)
+                .unwrap_err()
+                .to_string()
+                .contains("requires review")
+        );
+        assert!(
+            app.snapshot().unwrap()["moves"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        let mut reviewed = request(&app, "e2e4");
+        reviewed.vision_session = Some(id);
+        reviewed.proposal_id = decision["proposal_id"].as_str().map(str::to_owned);
+        let state = app.apply_move(reviewed).unwrap();
+        assert_eq!(state["moves"][0]["provenance"], "reviewed");
+        assert!(app.vision.is_some());
+    }
+
+    #[test]
+    fn automatic_api_moves_require_a_live_neural_proposal_and_save_once() {
+        let mut app = App::open(Store::open_in_memory().unwrap()).unwrap();
+        let mut unverified = request(&app, "e2e4");
+        unverified.automatic = true;
+        assert!(app.apply_move(unverified).is_err());
+        let id = SessionId::new();
+        let game = ChessGame::standard();
+        app.begin_vision(vision_request(
+            &app,
+            neural_observation(&game, id, 0, false),
+        ))
+        .unwrap();
+        let mut after = game.clone();
+        after.play_uci("e2e4").unwrap();
+        let mut decision = Value::Null;
+        for sequence in [1, 2, 3] {
+            decision = app
+                .observe_vision(vision_request(
+                    &app,
+                    neural_observation(&after, id, sequence, false),
+                ))
+                .unwrap();
+        }
+        assert_eq!(decision["kind"], "candidate");
+        let mut accepted = request(&app, "e2e4");
+        accepted.automatic = true;
+        accepted.vision_session = Some(id);
+        accepted.proposal_id = decision["proposal_id"].as_str().map(str::to_owned);
+        let state = app.apply_move(accepted).unwrap();
+        assert_eq!(state["moves"][0]["provenance"], "automatic");
+        assert_eq!(state["turn"], "Black");
+        assert!(app.vision.is_some());
+        let unchanged = app
+            .observe_vision(vision_request(
+                &app,
+                neural_observation(&after, id, 4, false),
+            ))
+            .unwrap();
+        assert_eq!(unchanged["kind"], "unchanged");
+        assert_eq!(
+            app.snapshot().unwrap()["moves"].as_array().unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn stale_neural_proposals_cannot_commit_after_motion_or_manual_edits() {
+        let mut app = App::open(Store::open_in_memory().unwrap()).unwrap();
+        let id = SessionId::new();
+        let game = ChessGame::standard();
+        app.begin_vision(vision_request(
+            &app,
+            neural_observation(&game, id, 0, false),
+        ))
+        .unwrap();
+        let mut after = game.clone();
+        after.play_uci("e2e4").unwrap();
+        let mut decision = Value::Null;
+        for sequence in [1, 2, 3] {
+            decision = app
+                .observe_vision(vision_request(
+                    &app,
+                    neural_observation(&after, id, sequence, false),
+                ))
+                .unwrap();
+        }
+        let mut stale = request(&app, "e2e4");
+        stale.automatic = true;
+        stale.vision_session = Some(id);
+        stale.proposal_id = decision["proposal_id"].as_str().map(str::to_owned);
+        app.observe_vision(vision_request(
+            &app,
+            neural_observation(&after, id, 4, true),
+        ))
+        .unwrap();
+        assert!(app.apply_move(stale).is_err());
+        app.apply_move(request(&app, "d2d4")).unwrap();
+        assert!(app.vision.is_none());
+        app.undo(PositionRequest {
+            game_id: app.game_id,
+            revision: 0,
+            expected_ply: 1,
+        })
+        .unwrap();
+        assert!(app.vision.is_none());
+    }
+
+    #[test]
+    fn rejected_observation_discards_the_session_and_its_proposal() {
+        let mut app = App::open(Store::open_in_memory().unwrap()).unwrap();
+        let id = SessionId::new();
+        let game = ChessGame::standard();
+        app.begin_vision(vision_request(
+            &app,
+            neural_observation(&game, id, 0, false),
+        ))
+        .unwrap();
+        let mut after = game.clone();
+        after.play_uci("e2e4").unwrap();
+        let mut decision = Value::Null;
+        for sequence in [1, 2, 3] {
+            decision = app
+                .observe_vision(vision_request(
+                    &app,
+                    neural_observation(&after, id, sequence, false),
+                ))
+                .unwrap();
+        }
+        assert_eq!(decision["kind"], "candidate");
+        let mut stale = request(&app, "e2e4");
+        stale.automatic = true;
+        stale.vision_session = Some(id);
+        stale.proposal_id = decision["proposal_id"].as_str().map(str::to_owned);
+
+        let error = app
+            .observe_vision(vision_request(
+                &app,
+                neural_observation(&after, id, 5, false),
+            ))
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("sequence has a gap"),
+            "{error:#}"
+        );
+        assert!(app.vision.is_none());
+        assert!(app.apply_move(stale).is_err());
+        assert!(
+            app.snapshot().unwrap()["moves"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

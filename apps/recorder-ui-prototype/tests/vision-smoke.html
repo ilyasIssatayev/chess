@@ -1,0 +1,89 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Neural chess model smoke check</title>
+<style>body{font:16px system-ui;max-width:1000px;margin:30px auto;background:#101612;color:#f0f5f1}img{width:min(650px,100%)}button{padding:12px;font:inherit}pre{white-space:pre-wrap}a{color:#55d987}</style>
+<h1>Neural chess model smoke check</h1>
+<p>Real board photo from the MIT-licensed <a href="https://github.com/samryan18/chess-dataset">samryan18 chess dataset</a>. This verifies local model execution and crop/class mapping; it does not measure accuracy on the user's board.</p>
+<img id="fixture" src="/vision-fixture.jpg" alt="Public test photo of a physical chessboard">
+<p id="status">Loading and executing both neural models…</p>
+<button id="run" disabled>Run model on photo</button>
+<pre id="result"></pre>
+<script src="/vision-client.js"></script>
+<script src="/vision-core.js"></script>
+<script src="/vision-store.js"></script>
+<script>
+const client = new VisionClient();
+const image = document.querySelector('#fixture');
+client.ready.then(() => { document.querySelector('#status').textContent = 'Both ONNX graphs executed successfully'; document.querySelector('#run').disabled = false; }).catch(e => { document.querySelector('#status').textContent = e.message; });
+const names = Array.from({length:64},(_,i)=>`${'abcdefgh'[i%8]}${8-Math.floor(i/8)}`);
+const symbols = 'PNBRQKpnbrqk';
+const expected = '4k3/1R6/8/1p6/6P1/7q/1PP5/1K1R4'.replaceAll('/','').split('').flatMap(c=>/\d/.test(c)?Array(Number(c)).fill('.'):c);
+document.querySelector('#run').onclick = async () => {
+  document.querySelector('#run').disabled = true;
+  try {
+    await image.decode();
+    const corners = {a8:{x:325/1200,y:230/800},h8:{x:790/1200,y:232/800},h1:{x:785/1200,y:694/800},a1:{x:321/1200,y:690/800}};
+    const labels = Object.fromEntries(names.map((name, i) => [name, expected[i] === '.' ? null : ChessVisionCore.classes[symbols.indexOf(expected[i])]]));
+    const result = await client.infer(image,corners, {sample:true,inspect:true,position:'4k3/1R6/8/1p6/6P1/7q/1PP5/1K1R4',pieces:labels});
+    const featuresOK = result.sample.occupancy.every(v=>v.length===1024 && v.every(Number.isFinite)) && result.sample.pieces.every(v=>v.length===1024 && v.every(Number.isFinite));
+    const store = new PersonalVisionStore();
+    await store.set({samples:[result.sample],model:null,enabled:false});
+    const restored = await store.get();
+    const storedOK = restored.samples[0].pieces[0] instanceof Float32Array && restored.samples[0].labels.every((v,i)=>v===result.sample.labels[i]);
+    const evidence = Object.fromEntries(result.squares.map(s=>[s.square,s]));
+    const actual = names.map(name => {
+      const e = evidence[name], p = [e.empty_probability,...e.piece_probabilities];
+      const i = p.indexOf(Math.max(...p)); return i === 0 ? '.' : symbols[i-1];
+    });
+    const correct = actual.filter((piece,i)=>piece===expected[i]).length;
+    const game = await (await fetch('/api/game')).json();
+    const referenceResponse = await fetch('/api/vision/reference', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({game_id:game.game_id,revision:game.revision,expected_ply:game.moves.length,observation:{session_id:crypto.randomUUID(),sequence:0,capture_time:Math.round(performance.now()*1000),moving:false,calibration_version:JSON.stringify(corners),model_version:result.version,squares:result.squares}})});
+    const referenceResult = await referenceResponse.json();
+    const rejected = !referenceResponse.ok && referenceResult.error.includes('The model cannot verify');
+    document.querySelector('#status').textContent = `${correct}/64 squares match the labelled photo · ${result.latency_ms} ms · neural features ${featuresOK?'valid':'INVALID'} · local examples ${storedOK?'saved/restored':'FAILED'} · incorrect starting-position reference ${rejected ? 'rejected correctly' : 'NOT rejected'}`;
+    document.querySelector('#result').textContent = JSON.stringify({correct,featuresOK,storedOK,crops:result.previews.length,expected:expected.join(''),actual:actual.join(''),uncertain:result.squares.filter(s=>s.visible_probability<.5).map(s=>s.square),differences:names.filter((_,i)=>actual[i]!==expected[i])},null,2);
+  } catch(error) {document.querySelector('#status').textContent = error.message;}
+  finally {document.querySelector('#run').disabled = false;}
+};
+</script>
+<hr>
+<h2>Personal-head integration check</h2>
+<p>This uses explicitly synthetic labels/features to check training, persistence, integrity, activation and calibration invalidation. It does not evaluate chess recognition accuracy.</p>
+<button id="personal-run" disabled>Check personal model pipeline</button>
+<pre id="personal-result"></pre>
+<script>
+client.ready.then(()=>document.querySelector('#personal-run').disabled=false).catch(()=>{});
+document.querySelector('#personal-run').onclick=async()=>{
+  document.querySelector('#personal-run').disabled=true;
+  const report=document.querySelector('#personal-result');
+  report.textContent='Training synthetic features in the recognition worker…';
+  try {
+    await image.decode();
+    const corners={a8:{x:325/1200,y:230/800},h8:{x:790/1200,y:232/800},h1:{x:785/1200,y:694/800},a1:{x:321/1200,y:690/800}};
+    const real=await client.infer(image,corners);
+    const vector=label=>{const x=new Float32Array(1024);x[label+1]=10;return x;};
+    const samples=Array.from({length:3},(_,frame)=>{
+      const labels=Array.from({length:64},(_,i)=>i<32?i%12:-1);
+      return {base_version:real.version,calibration:real.calibration,position:`synthetic-${frame}`,labels,coverage:labels.map(()=>1),squares:ChessVisionCore.geometry(corners,1200,800).squares,
+        occupancy:labels.map(l=>vector(l<0?0:1)),pieces:labels.map(vector),baseline:labels.map(()=>-1)};
+    });
+    const start=performance.now();
+    const model=await client.request('train',{samples});
+    const training_ms=Math.round(performance.now()-start);
+    const store=new PersonalVisionStore();await store.set({samples,model,enabled:true});
+    const saved=await store.get();await client.request('personal',{model:saved.model});
+    const adapted=await client.infer(image,corners);
+    const shifted=await client.infer(image,{...corners,a8:{x:corners.a8.x+.001,y:corners.a8.y}});
+    const damaged=structuredClone(saved.model);damaged.pieces.weights[0]+=1;
+    let integrityRejected=false;
+    try{await client.request('personal',{model:damaged});}catch(e){integrityRejected=e.message.includes('integrity failed');}
+    await client.request('personal',{model:null});
+    const restored=await client.infer(image,corners);
+    const checks={training_ms,heldOut:model.metrics.correct===64,savedTypedFeatures:saved.samples[0].pieces[0] instanceof Float32Array,
+      restoredModel:adapted.personalized && adapted.version.endsWith(model.id),geometryChangeDisables:!shifted.personalized,integrityRejected,baseRestored:!restored.personalized && restored.version===real.version};
+    report.textContent=JSON.stringify(checks,null,2);
+    document.querySelector('#personal-run').textContent=Object.entries(checks).every(([k,v])=>k==='training_ms'||v)?'Personal model pipeline passed':'Personal model pipeline FAILED';
+  }catch(e){report.textContent=e.message;}
+  finally{document.querySelector('#personal-run').disabled=false;}
+};
+</script>
