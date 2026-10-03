@@ -1020,6 +1020,10 @@ pub enum StorageError {
 mod tests {
     use super::*;
     use contracts::{MoveProvenance, TimingQuality};
+    use std::process::Command;
+
+    const KILL_TEST_DATABASE: &str = "CHESS_STORAGE_KILL_TEST_DATABASE";
+    const KILL_TEST_GAME_ID: &str = "CHESS_STORAGE_KILL_TEST_GAME_ID";
 
     fn record(game_id: GameId) -> MoveRecord {
         records(game_id, 0, &["e2e4"], MoveProvenance::Automatic).remove(0)
@@ -1145,6 +1149,149 @@ mod tests {
             Err(StorageError::DisconnectedPosition { .. })
         ));
         assert!(store.load_moves(game_id, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn move_projection_failure_rolls_back_journal_and_head() {
+        let game_id = GameId::new();
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .create_game(game_id, ChessGame::standard().initial_fen(), 123)
+            .unwrap();
+        store
+            .connection
+            .execute_batch(
+                "CREATE TEMP TRIGGER inject_move_projection_failure
+                 BEFORE INSERT ON moves BEGIN
+                    SELECT RAISE(ABORT, 'injected move projection failure');
+                 END;",
+            )
+            .unwrap();
+
+        assert!(matches!(
+            store.append_move("capture-10", &record(game_id), 200),
+            Err(StorageError::Sql(_))
+        ));
+        let (events, moves, head): (i64, i64, i64) = store
+            .connection
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM events WHERE game_id = ?1),
+                    (SELECT COUNT(*) FROM moves WHERE game_id = ?1),
+                    head_sequence
+                 FROM games WHERE id = ?1",
+                params![game_id.0.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((events, moves, head), (0, 0, 0));
+
+        store
+            .connection
+            .execute_batch("DROP TRIGGER inject_move_projection_failure;")
+            .unwrap();
+        assert_eq!(
+            store
+                .append_move("capture-10", &record(game_id), 200)
+                .unwrap(),
+            AppendOutcome::Appended { sequence: 1 }
+        );
+        assert_eq!(store.replay_journal(game_id).unwrap().moves.len(), 1);
+    }
+
+    #[test]
+    fn head_update_failure_rolls_back_journal_and_projection() {
+        let game_id = GameId::new();
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .create_game(game_id, ChessGame::standard().initial_fen(), 123)
+            .unwrap();
+        store
+            .connection
+            .execute_batch(
+                "CREATE TEMP TRIGGER inject_head_update_failure
+                 BEFORE UPDATE OF head_sequence ON games BEGIN
+                    SELECT RAISE(ABORT, 'injected head update failure');
+                 END;",
+            )
+            .unwrap();
+
+        assert!(matches!(
+            store.append_move("capture-10", &record(game_id), 200),
+            Err(StorageError::Sql(_))
+        ));
+        assert!(store.load_moves(game_id, 0).unwrap().is_empty());
+        let (event_count, head): (i64, i64) = store
+            .connection
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM events WHERE game_id = ?1),
+                    head_sequence
+                 FROM games WHERE id = ?1",
+                params![game_id.0.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((event_count, head), (0, 0));
+    }
+
+    #[test]
+    fn process_termination_rolls_back_an_open_write_transaction() {
+        if let (Ok(path), Ok(game_id)) = (
+            std::env::var(KILL_TEST_DATABASE),
+            std::env::var(KILL_TEST_GAME_ID),
+        ) {
+            let connection = Connection::open(path).unwrap();
+            configure(&connection, true).unwrap();
+            connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+            connection
+                .execute(
+                    "INSERT INTO events (
+                        game_id, sequence, event_id, idempotency_key, schema_version,
+                        event_type, payload_json, created_utc_us
+                     ) VALUES (?1, 1, ?2, 'capture-10', 1, 'move_accepted', '{}', 200)",
+                    params![game_id, Uuid::now_v7().to_string()],
+                )
+                .unwrap();
+            // `exit` skips Rust destructors, leaving SQLite and the OS to recover the open WAL
+            // transaction just as they must after an abruptly terminated recorder process.
+            std::process::exit(86);
+        }
+
+        let game_id = GameId::new();
+        let path = std::env::temp_dir().join(format!("chess-kill-{}.sqlite", Uuid::now_v7()));
+        {
+            let mut store = Store::open(&path).unwrap();
+            store
+                .create_game(game_id, ChessGame::standard().initial_fen(), 100)
+                .unwrap();
+        }
+
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::process_termination_rolls_back_an_open_write_transaction",
+                "--nocapture",
+            ])
+            .env(KILL_TEST_DATABASE, &path)
+            .env(KILL_TEST_GAME_ID, game_id.0.to_string())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(86));
+
+        {
+            let mut reopened = Store::open(&path).unwrap();
+            let replayed = reopened.replay_journal(game_id).unwrap();
+            assert!(replayed.moves.is_empty());
+            assert_eq!(
+                reopened
+                    .append_move("capture-10", &record(game_id), 300)
+                    .unwrap(),
+                AppendOutcome::Appended { sequence: 1 }
+            );
+            assert_eq!(reopened.replay_journal(game_id).unwrap().moves.len(), 1);
+        }
+        remove_database(&path);
     }
 
     #[test]

@@ -19,6 +19,17 @@ pub struct ChessGame {
     history: Vec<AppliedMove>,
 }
 
+/// History-dependent draw information that is not available from a FEN alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepetitionStatus {
+    /// Number of occurrences of the current position in this game's trusted history.
+    pub current_position_occurrences: u32,
+    /// FIDE threefold repetition can be claimed once the current position occurred three times.
+    pub threefold_claim_available: bool,
+    /// FIDE fivefold repetition ends the game automatically.
+    pub fivefold_automatic_draw: bool,
+}
+
 impl Default for ChessGame {
     fn default() -> Self {
         Self::standard()
@@ -60,12 +71,37 @@ impl ChessGame {
 
     /// Returns the position-only status reported by `cozy-chess`.
     ///
-    /// This reports a draw when the FEN halfmove clock reaches 100 plies, but it
-    /// does not distinguish a claim from an automatic result. It also does not
-    /// scan this game's history for threefold repetition. Higher-level game
-    /// adjudication must track repetition and draw claims separately.
+    /// This reports the position-only result from the rules dependency. Use
+    /// [`ChessGame::repetition_status`] for history-dependent repetition policy.
     pub fn status(&self) -> GameStatus {
         self.board.status()
+    }
+
+    /// Reports repetition state for the current trusted position.
+    ///
+    /// `Board::same_position` follows FIDE position identity, including side to
+    /// move, castling rights, and whether an en-passant capture is actually
+    /// possible. Move counters do not affect identity.
+    pub fn repetition_status(&self) -> RepetitionStatus {
+        let initial = self
+            .initial_fen
+            .parse::<Board>()
+            .expect("the normalized initial FEN was already parsed");
+        let occurrences = std::iter::once(initial)
+            .chain(self.history.iter().map(|applied| {
+                applied
+                    .fen_after
+                    .parse::<Board>()
+                    .expect("recorded FEN came from a valid board")
+            }))
+            .filter(|position| position.same_position(&self.board))
+            .count() as u32;
+
+        RepetitionStatus {
+            current_position_occurrences: occurrences,
+            threefold_claim_available: occurrences >= 3,
+            fivefold_automatic_draw: occurrences >= 5,
+        }
     }
 
     pub fn legal_uci_moves(&self) -> Vec<String> {
@@ -411,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn rebuilds_a_threefold_position_without_adjudicating_repetition() {
+    fn rebuilds_and_reports_a_threefold_position() {
         let moves = [
             "g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1", "f6g8",
         ];
@@ -432,9 +468,45 @@ mod tests {
         assert_eq!(repetition_key(&game.history()[3].fen_after), initial_key);
         assert_eq!(repetition_key(&game.history()[7].fen_after), initial_key);
         assert_eq!(repetition_key(&game.fen()), initial_key);
-        // `Board::status` has no prior-position history, so repetition is a
-        // separate higher-level adjudication concern.
+        assert_eq!(
+            game.repetition_status(),
+            RepetitionStatus {
+                current_position_occurrences: 3,
+                threefold_claim_available: true,
+                fivefold_automatic_draw: false,
+            }
+        );
+        // The dependency status remains position-only; callers use the
+        // repetition policy above when determining a game result.
         assert_eq!(game.status(), GameStatus::Ongoing);
+    }
+
+    #[test]
+    fn reports_fivefold_repetition_separately_from_threefold_claims() {
+        let cycle = ["g1f3", "g8f6", "f3g1", "f6g8"];
+        let moves = cycle.repeat(4);
+        let mut game = ChessGame::standard();
+
+        game.rebuild(
+            &moves
+                .iter()
+                .map(|uci| (*uci).to_owned())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+
+        assert_eq!(game.repetition_status().current_position_occurrences, 5);
+        assert!(game.repetition_status().threefold_claim_available);
+        assert!(game.repetition_status().fivefold_automatic_draw);
+    }
+
+    #[test]
+    fn repetition_identity_ignores_move_counters() {
+        let mut game = ChessGame::from_fen("7k/8/8/8/8/8/6N1/7K w - - 37 20").unwrap();
+        play(&mut game, &["g2f4", "h8g8", "f4g2", "g8h8"]);
+
+        assert_eq!(game.repetition_status().current_position_occurrences, 2);
+        assert!(!game.repetition_status().threefold_claim_available);
     }
 
     #[test]

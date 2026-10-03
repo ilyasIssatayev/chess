@@ -1,4 +1,4 @@
-use capture_probe::{Command, help_text, parse_cli};
+use capture_probe::{Command, help_text, parse_cli, verify_capture_run};
 
 fn main() {
     let command = match parse_cli(std::env::args().skip(1)) {
@@ -12,6 +12,22 @@ fn main() {
     if command == Command::Help {
         println!("{}", help_text());
         return;
+    }
+
+    if let Command::Verify { input } = &command {
+        match verify_capture_run(input) {
+            Ok(report) => {
+                println!(
+                    "verified {} frames ({} saved images); timestamp source: {}",
+                    report.frame_count, report.saved_frame_count, report.timestamp_source
+                );
+                return;
+            }
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
     }
 
     if let Err(error) = platform::run(command) {
@@ -53,6 +69,7 @@ mod platform {
     pub fn run(command: Command) -> Result<(), String> {
         match command {
             Command::Help => unreachable!("help is handled before platform dispatch"),
+            Command::Verify { .. } => unreachable!("verify is handled before platform dispatch"),
             Command::Permission => {
                 request_permission()?;
                 println!("camera permission: granted");

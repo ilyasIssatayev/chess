@@ -67,6 +67,8 @@ name = "capture-probe"
 version = "0.1.0"
 dependencies = [
  "nokhwa",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

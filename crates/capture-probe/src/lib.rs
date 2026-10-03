@@ -5,8 +5,11 @@
 //! they can be tested without opening a camera.
 
 use std::fmt::Write as _;
-use std::io::{self, Write};
-use std::path::PathBuf;
+use std::fs;
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
 
 pub const TIMESTAMP_SOURCE: &str = "process_monotonic_after_blocking_capture";
 
@@ -14,6 +17,7 @@ pub const TIMESTAMP_SOURCE: &str = "process_monotonic_after_blocking_capture";
 pub enum Command {
     Help,
     Permission,
+    Verify { input: PathBuf },
     Devices { json: bool },
     Formats { device: u32, json: bool },
     Sample(SampleOptions),
@@ -83,6 +87,14 @@ where
         "permission" => {
             reject_extra(args)?;
             Ok(Command::Permission)
+        }
+        "verify" => {
+            let input = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "verify requires a run directory".to_owned())?;
+            reject_extra(args)?;
+            Ok(Command::Verify { input })
         }
         "devices" => {
             let mut json = false;
@@ -215,6 +227,7 @@ pub fn help_text() -> &'static str {
 
 USAGE:
   capture-probe permission
+  capture-probe verify RUN_DIRECTORY
   capture-probe devices [--json]
   capture-probe formats [--device INDEX] [--json]
   capture-probe sample [OPTIONS]
@@ -230,6 +243,247 @@ SAMPLE OPTIONS:
 
 The sample command writes manifest.json, frames.jsonl and optional frame-*.ppm files.
 Frame times are process-side receipt timestamps; they are not AVFoundation sample PTS."#
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerificationReport {
+    pub frame_count: u64,
+    pub saved_frame_count: u64,
+    pub timestamp_source: String,
+}
+
+#[derive(Deserialize)]
+struct StoredManifest {
+    schema_version: u32,
+    timestamp_source: String,
+    format: StoredFormat,
+    summary: StoredSummary,
+}
+
+#[derive(Deserialize)]
+struct StoredFormat {
+    width: u32,
+    height: u32,
+    fps: u32,
+}
+
+#[derive(Deserialize)]
+struct StoredSummary {
+    frame_count: u64,
+    first_received_mono_ns: Option<u64>,
+    last_received_mono_ns: Option<u64>,
+    elapsed_ns: u64,
+    observed_fps: Option<f64>,
+    max_interarrival_ns: Option<u64>,
+    mean_capture_block_ns: Option<f64>,
+    gap_count: u64,
+    gap_threshold_ns: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct StoredFrame {
+    sequence: u64,
+    capture_started_mono_ns: u64,
+    received_mono_ns: u64,
+    received_unix_ns: u128,
+    capture_block_ns: u64,
+    interarrival_ns: Option<u64>,
+    raw_bytes: usize,
+    decoded_rgb_bytes: usize,
+    saved_path: Option<String>,
+}
+
+/// Recomputes a run's timing summary from `frames.jsonl` and checks saved PPM
+/// evidence. This intentionally does not trust the summary in `manifest.json`.
+pub fn verify_capture_run(run_dir: &Path) -> Result<VerificationReport, String> {
+    let manifest_path = run_dir.join("manifest.json");
+    let manifest: StoredManifest = serde_json::from_reader(
+        fs::File::open(&manifest_path)
+            .map_err(|error| format!("could not open {}: {error}", manifest_path.display()))?,
+    )
+    .map_err(|error| format!("invalid {}: {error}", manifest_path.display()))?;
+    if manifest.schema_version != 1 {
+        return Err(format!(
+            "unsupported manifest schema version {}; expected 1",
+            manifest.schema_version
+        ));
+    }
+    if manifest.timestamp_source != TIMESTAMP_SOURCE {
+        return Err(format!(
+            "unexpected timestamp source {:?}; expected {TIMESTAMP_SOURCE:?}",
+            manifest.timestamp_source
+        ));
+    }
+
+    let frames_path = run_dir.join("frames.jsonl");
+    let reader = BufReader::new(
+        fs::File::open(&frames_path)
+            .map_err(|error| format!("could not open {}: {error}", frames_path.display()))?,
+    );
+    let mut tracker = CaptureTracker::new(manifest.format.fps);
+    let mut saved_frame_count = 0_u64;
+    let mut previous_received_mono_ns = None;
+    for (line_index, line) in reader.lines().enumerate() {
+        let line_number = line_index + 1;
+        let line = line.map_err(|error| {
+            format!(
+                "could not read {} line {line_number}: {error}",
+                frames_path.display()
+            )
+        })?;
+        let frame: StoredFrame = serde_json::from_str(&line).map_err(|error| {
+            format!(
+                "invalid {} line {line_number}: {error}",
+                frames_path.display()
+            )
+        })?;
+        let expected_sequence = u64::try_from(line_index).map_err(|_| "too many frames")?;
+        if frame.sequence != expected_sequence {
+            return Err(format!(
+                "frame sequence {} at line {line_number}; expected {expected_sequence}",
+                frame.sequence
+            ));
+        }
+        if frame.raw_bytes == 0 {
+            return Err(format!("frame {} has an empty raw buffer", frame.sequence));
+        }
+        if frame.capture_started_mono_ns > frame.received_mono_ns {
+            return Err(format!(
+                "frame {} has a reversed capture interval",
+                frame.sequence
+            ));
+        }
+        if previous_received_mono_ns.is_some_and(|previous| {
+            frame.capture_started_mono_ns < previous || frame.received_mono_ns < previous
+        }) {
+            return Err(format!(
+                "frame {} overlaps or precedes the prior monotonic capture interval",
+                frame.sequence
+            ));
+        }
+        previous_received_mono_ns = Some(frame.received_mono_ns);
+
+        let recomputed = tracker.record(
+            frame.capture_started_mono_ns,
+            frame.received_mono_ns,
+            frame.received_unix_ns,
+            frame.raw_bytes,
+            frame.decoded_rgb_bytes,
+            frame.saved_path.clone(),
+        );
+        if recomputed.capture_block_ns != frame.capture_block_ns
+            || recomputed.interarrival_ns != frame.interarrival_ns
+        {
+            return Err(format!(
+                "frame {} has inconsistent derived timing fields",
+                frame.sequence
+            ));
+        }
+
+        if let Some(relative) = frame.saved_path {
+            let relative_path = Path::new(&relative);
+            if relative_path.is_absolute()
+                || relative_path.components().any(|part| {
+                    matches!(
+                        part,
+                        std::path::Component::ParentDir | std::path::Component::RootDir
+                    )
+                })
+            {
+                return Err(format!(
+                    "frame {} has unsafe saved_path {relative:?}",
+                    frame.sequence
+                ));
+            }
+            verify_ppm(
+                &run_dir.join(relative_path),
+                manifest.format.width,
+                manifest.format.height,
+                frame.decoded_rgb_bytes,
+            )?;
+            saved_frame_count += 1;
+        }
+    }
+
+    let actual = tracker.summary();
+    let expected = manifest.summary;
+    if actual.frame_count == 0 {
+        return Err("frames.jsonl contains no frames".to_owned());
+    }
+    if actual.frame_count != expected.frame_count
+        || actual.first_received_mono_ns != expected.first_received_mono_ns
+        || actual.last_received_mono_ns != expected.last_received_mono_ns
+        || actual.elapsed_ns != expected.elapsed_ns
+        || !optional_float_nearly_equal(actual.observed_fps, expected.observed_fps)
+        || actual.max_interarrival_ns != expected.max_interarrival_ns
+        || !optional_float_nearly_equal(
+            actual.mean_capture_block_ns,
+            expected.mean_capture_block_ns,
+        )
+        || actual.gap_count != expected.gap_count
+        || actual.gap_threshold_ns != expected.gap_threshold_ns
+    {
+        return Err("manifest summary does not match frames.jsonl recomputation".to_owned());
+    }
+
+    Ok(VerificationReport {
+        frame_count: actual.frame_count,
+        saved_frame_count,
+        timestamp_source: manifest.timestamp_source,
+    })
+}
+
+fn optional_float_nearly_equal(left: Option<f64>, right: Option<f64>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) if left.is_finite() && right.is_finite() => {
+            (left - right).abs() <= 0.000_001
+        }
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn verify_ppm(path: &Path, width: u32, height: u32, decoded_bytes: usize) -> Result<(), String> {
+    let mut file = fs::File::open(path)
+        .map_err(|error| format!("could not open saved frame {}: {error}", path.display()))?;
+    let expected_header = format!("P6\n{width} {height}\n255\n");
+    let mut header = vec![0_u8; expected_header.len()];
+    file.read_exact(&mut header)
+        .map_err(|error| format!("could not read saved frame {}: {error}", path.display()))?;
+    if header != expected_header.as_bytes() {
+        return Err(format!(
+            "saved frame {} has an unexpected PPM header",
+            path.display()
+        ));
+    }
+    let expected_rgb = usize::try_from(width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(3))
+        .ok_or_else(|| "manifest image dimensions overflow".to_owned())?;
+    if decoded_bytes != expected_rgb {
+        return Err(format!(
+            "saved frame {} decoded byte count is inconsistent",
+            path.display()
+        ));
+    }
+    let actual_length = usize::try_from(
+        file.metadata()
+            .map_err(|error| format!("could not inspect {}: {error}", path.display()))?
+            .len(),
+    )
+    .map_err(|_| format!("saved frame {} is too large", path.display()))?;
+    if actual_length != expected_header.len() + expected_rgb {
+        return Err(format!(
+            "saved frame {} has an unexpected file length",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -519,6 +773,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_offline_verification_command() {
+        assert_eq!(
+            parse_cli(args(&["verify", "local-data/run-001"])).unwrap(),
+            Command::Verify {
+                input: PathBuf::from("local-data/run-001")
+            }
+        );
+    }
+
+    #[test]
     fn rejects_zero_frames() {
         let error = parse_cli(args(&["sample", "--frames", "0"])).unwrap_err();
         assert_eq!(error, "--frames must be at least 1");
@@ -579,5 +843,94 @@ mod tests {
         assert!(json.ends_with('}'));
         assert!(json.contains("\"interarrival_ns\":null"));
         assert!(json.contains("\"saved_path\":\"frames/frame-000000.ppm\""));
+    }
+
+    #[test]
+    fn verifier_recomputes_timing_and_checks_saved_evidence() {
+        let unique = format!(
+            "capture-probe-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let run = std::env::temp_dir().join(unique);
+        fs::create_dir_all(run.join("frames")).unwrap();
+        fs::write(
+            run.join("frames/frame-000000.ppm"),
+            b"P6\n1 1\n255\n\x01\x02\x03",
+        )
+        .unwrap();
+
+        let mut tracker = CaptureTracker::new(10);
+        let first = tracker.record(1, 10, 100, 8, 3, Some("frames/frame-000000.ppm".to_owned()));
+        let second = tracker.record(50, 100_000_010, 200, 8, 0, None);
+        fs::write(
+            run.join("frames.jsonl"),
+            format!("{}\n{}\n", first.to_json_line(), second.to_json_line()),
+        )
+        .unwrap();
+        fs::write(
+            run.join("manifest.json"),
+            format!(
+                concat!(
+                    "{{\"schema_version\":1,",
+                    "\"timestamp_source\":\"{}\",",
+                    "\"format\":{{\"width\":1,\"height\":1,\"fps\":10}},",
+                    "\"summary\":{}}}"
+                ),
+                TIMESTAMP_SOURCE,
+                tracker.summary().to_json()
+            ),
+        )
+        .unwrap();
+
+        let report = verify_capture_run(&run).unwrap();
+        assert_eq!(report.frame_count, 2);
+        assert_eq!(report.saved_frame_count, 1);
+        fs::remove_dir_all(run).unwrap();
+    }
+
+    #[test]
+    fn verifier_rejects_tampered_derived_timing() {
+        let unique = format!("capture-probe-bad-test-{}", std::process::id());
+        let run = std::env::temp_dir().join(unique);
+        let _ = fs::remove_dir_all(&run);
+        fs::create_dir_all(&run).unwrap();
+        fs::write(
+            run.join("manifest.json"),
+            format!(
+                concat!(
+                    "{{\"schema_version\":1,",
+                    "\"timestamp_source\":\"{}\",",
+                    "\"format\":{{\"width\":1,\"height\":1,\"fps\":30}},",
+                    "\"summary\":{{\"frame_count\":1,\"first_received_mono_ns\":2,",
+                    "\"last_received_mono_ns\":2,\"elapsed_ns\":0,",
+                    "\"observed_fps\":null,\"max_interarrival_ns\":null,",
+                    "\"mean_capture_block_ns\":1.0,\"gap_count\":0,",
+                    "\"gap_threshold_ns\":83333332}}}}"
+                ),
+                TIMESTAMP_SOURCE
+            ),
+        )
+        .unwrap();
+        fs::write(
+            run.join("frames.jsonl"),
+            concat!(
+                "{\"sequence\":0,\"capture_started_mono_ns\":1,",
+                "\"received_mono_ns\":2,\"received_unix_ns\":3,",
+                "\"capture_block_ns\":99,\"interarrival_ns\":null,",
+                "\"raw_bytes\":1,\"decoded_rgb_bytes\":0,\"saved_path\":null}\n"
+            ),
+        )
+        .unwrap();
+
+        assert!(
+            verify_capture_run(&run)
+                .unwrap_err()
+                .contains("inconsistent derived timing")
+        );
+        fs::remove_dir_all(run).unwrap();
     }
 }

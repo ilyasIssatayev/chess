@@ -53,3 +53,6 @@ The preparatory [manual geometry guide](docs/geometry.md) describes the labeled-
 ## Project status and plan
 
 The [development plan](docs/development-plan.md) defines the architecture, 22 five-hour work frames, model assignments, phase gates, accuracy targets, and database/export behavior. The [work log](docs/work-log.md) records measured progress and remaining hardware dependencies. Evaluation recordings use the versioned [annotation manifest format](docs/evaluation-format.md).
+
+The accepted workspace, persistence, result, and provisional timestamp choices
+are recorded in the [Phase 1 decisions](docs/phase-1-decisions.md).

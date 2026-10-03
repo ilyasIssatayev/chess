@@ -53,6 +53,14 @@ cargo run --manifest-path crates/capture-probe/Cargo.toml -- sample \
 
 The probe refuses to write into a non-empty output directory so an earlier run is not silently overwritten. Use a new `run-NNN` path for each capture.
 
+Verify a completed run independently from the serialized evidence:
+
+```sh
+cargo run -p capture-probe -- verify local-data/camera-probe/run-001
+```
+
+The verifier recomputes sequences, capture intervals, inter-arrival values, gap counts, and summary totals from `frames.jsonl`. It also checks the timestamp-source contract and the dimensions and lengths of saved PPM files. A successful result detects accidental truncation or inconsistent derived fields; it does not turn process receipt times into native camera timestamps.
+
 The probe deliberately labels its timestamps as `process_monotonic_after_blocking_capture`. Nokhwa's high-level frame API does not expose the native `CMSampleBuffer` presentation timestamp. Therefore the recorded value is a receipt bound after the blocking capture call returns, not a claim about sensor exposure time. Frame 3 should either carry this limitation into the capture contract or replace the adapter with a narrow AVFoundation implementation that exposes native PTS.
 
 Only frames selected by `--save-every` are RGB-decoded, because decoding every 1920×1080 YUYV frame in the measurement loop distorted the observed cadence on the target Mac. Unsampled JSONL records use `decoded_rgb_bytes: 0`. For a clean cadence measurement use `--save-every 0`; run a separate short sample with saved frames to verify RGB conversion.
@@ -73,6 +81,14 @@ Run these checks on the target MacBook and preserve the console output plus the 
 Frame 1 passes only when a runnable probe, sample frames, format listing, permission/recovery observations, and timestamp report exist for the actual target MacBook. The current target has a granted permission result, device/active-format report, a 120-frame timing run, and a one-frame RGB output check recorded in the [work log](work-log.md). Permission denial/recovery and interruption behavior remain untested, so Frame 1 has not passed.
 
 ## Frame 2 placement procedure
+
+For the first board session, the guided collector records machine/device metadata and a short verified sample in each orientation:
+
+```sh
+scripts/collect-board-readiness.sh local-data/board-readiness/session-001
+```
+
+The collector refuses to reuse an existing directory. It creates an annotation header and a session README beside the evidence. The two short samples establish field of view and saved-frame integrity; use a separate scripted-move recording for the event annotations below.
 
 Use a stable table, an unmoving laptop, the complete intended board and pieces, and steady lighting. Tape or mark the board/laptop positions only after finding a view that includes all 64 squares.
 
