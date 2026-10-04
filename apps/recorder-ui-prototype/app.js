@@ -1,4 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
+let nativeTimer, nativePolling = false;
+const nativeMode = () => $("#camera-source").value === "native";
+if (new URLSearchParams(location.search).get("native") === "1") $("#camera-source").value = "native";
 const video = $("#video");
 const canvas = $("#motion-canvas");
 const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -161,6 +164,7 @@ function toggleCalibration() {
     if (!calibrationQuality(points, viewport.clientWidth, viewport.clientHeight).valid) return;
     localStorage.setItem("chess-camera-board-corners-v2", JSON.stringify(corners));
     calibrationSaved = true;
+    if (stream?.native) stopCamera();
   }
   disarm("Calibration changed. Set a fresh reference before recording.");
   calibrationEditing = !calibrationEditing;
@@ -215,11 +219,26 @@ function disarm(copy = "Set the physical board to match the tracked position, th
   $("#position-confirm").checked = false;
   $("#sample-confirm").checked = false;
   $("#recording-label").textContent = "Recording paused";
+  if (stream?.native) api("/api/native/disarm",{}).catch(()=>{});
   if (game) setDecision("idle", "Set a reference position", copy);
   updateControls();
 }
 
 function updateControls() {
+  if (nativeMode()) {
+    const ready = game && stream && !calibrationEditing && calibrationSaved && performance.now()-lastFrameAt<2000 && !pending;
+    $("#reference-button").disabled = !ready || !$("#position-confirm").checked;
+    $("#read-board-button").disabled = !stream;
+    for (const id of ["sample-button","train-button","clear-personal-button","personal-enabled","recognition-mode"]) $("#"+id).disabled=true;
+    $("#auto-record").disabled=false;
+    $("#record-button").disabled=!game || !$("#manual-move").value || pending;
+    $("#undo-button").disabled=!game?.moves.length || pending;
+    $("#new-game-button").disabled=!game || pending;
+    $("#export-button").disabled=!game || pending;
+    calibrateButton.disabled=pending;
+    return;
+  }
+  $("#recognition-mode").disabled=false;
   const cameraReady = game && stream && !calibrationEditing && calibrationSaved && latestPatches && performance.now() - lastFrameAt <= 2000 && !pending;
   $("#reference-button").disabled = !cameraReady || !$("#position-confirm").checked || (usingModel() && (!modelReady || modelBusy));
   $("#read-board-button").disabled = !cameraReady || !modelReady || modelBusy || Boolean(tracker.reference);
@@ -287,7 +306,10 @@ async function recordMove(move, automatic = false, patches) {
     game = await api("/api/game/move", { ...positionRequest(), uci: move.uci, automatic, vision_session: move.vision_session, proposal_id: move.proposal_id });
     renderGame();
     candidate = null;
-    if (patches && tracker.reference && stream && !document.hidden && (!usingModel() || visionSession && move.proposal_id && game.vision_session === visionSession) && !CameraRecorder.changes(patches, latestPatches).some((e) => e.changed)) {
+    if (nativeMode() && game.vision_session) {
+      visionSession=game.vision_session;
+      setDecision("accepted",`${move.san} recorded`, `Saved with capture-time bounds. ${game.turn} to move.`,"✓",move);
+    } else if (patches && tracker.reference && stream && !document.hidden && (!usingModel() || visionSession && move.proposal_id && game.vision_session === visionSession) && !CameraRecorder.changes(patches, latestPatches).some((e) => e.changed)) {
       tracker.setReference(patches, performance.now());
       setDecision("accepted", `${move.san} recorded`, `Saved locally. ${game.turn} to move.`, "✓", move);
     } else {
@@ -301,6 +323,7 @@ async function recordMove(move, automatic = false, patches) {
 }
 
 async function toggleCamera() {
+  if (nativeMode()) { await toggleNative(); return; }
   if (stream) { stopCamera(); return; }
   cameraButton.disabled = true;
   let acquired;
@@ -333,6 +356,12 @@ async function toggleCamera() {
 }
 
 function stopCamera() {
+  if (stream?.native) {
+    clearInterval(nativeTimer); nativeTimer=null; stream=undefined; visionSession=null; candidate=null;
+    $("#native-preview").hidden=true; $("#video").hidden=false; $("#empty-camera").hidden=false;
+    $("#capture-label").textContent="Camera idle"; cameraButton.textContent="Start camera";
+    fetch("/api/native/stop",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}",keepalive:true}).catch(()=>{}); updateControls(); return;
+  }
   const old = stream;
   stream = undefined;
   old?.getTracks().forEach((track) => track.stop());
@@ -481,6 +510,13 @@ async function analyzeModel(readOnly = false) {
 }
 
 $("#reference-button").addEventListener("click", async () => {
+  if (nativeMode()) {
+    if (!game || pending || !$("#position-confirm").checked) return;
+    pending=true; updateControls();
+    try { game=await api("/api/native/reference",positionRequest()); visionSession=game.vision_session; $("#recording-label").textContent="Watching with native recognition"; setDecision("stable","Watching for a move",`${game.turn} to move. Timing uses camera presentation timestamps.`,"✓"); }
+    catch(error) {setDecision("review","Reference could not be verified",error.message,"!");}
+    finally{pending=false;updateControls();} return;
+  }
   if (!game || !stream || pending || !latestPatches || !$("#position-confirm").checked) return;
   const quality = calibrationQuality([corners.a8, corners.h8, corners.h1, corners.a1].map((p) => ({ x: p.x * viewport.clientWidth, y: p.y * viewport.clientHeight })), viewport.clientWidth, viewport.clientHeight);
   if (!quality.valid) { setDecision("review", "Check calibration", quality.label, "!"); return; }
@@ -510,6 +546,7 @@ $("#reference-button").addEventListener("click", async () => {
   updateControls();
 });
 $("#read-board-button").addEventListener("click", () => {
+  if (nativeMode()) { $("#camera-readout").open=true; pollNative(); return; }
   if (performance.now() - liveStableSince < 900) { setDecision("moving", "Wait for a stable board", "Keep your hands clear, then read the board again.", "↻"); return; }
   $("#camera-readout").open = true;
   analyzeModel(true);
@@ -520,7 +557,7 @@ $("#recognition-mode").addEventListener("change", () => {
 });
 
 $("#position-confirm").addEventListener("change", updateControls);
-$("#sensitivity").addEventListener("change", () => disarm("Detection sensitivity changed. Set a fresh reference."));
+$("#sensitivity").addEventListener("change", () => { if (stream?.native) stopCamera(); disarm("Detection sensitivity changed. Restart the camera and set a fresh reference."); });
 $("#record-button").addEventListener("click", () => {
   const uci = $("#manual-move").value;
   recordMove(candidate?.uci === uci ? candidate : game?.legal_moves.find((move) => move.uci === uci), false, candidate?.uci === uci ? candidate.patches : undefined);
@@ -651,3 +688,48 @@ $("#recognized-board").addEventListener("click", (event) => {
   $("#crop-detail").textContent = `${name} · ${Math.round(preview.coverage * 100)}% crop inside frame. ${top.map((p) => `${p.label}: ${Math.round(p.probability * 100)}%`).join("; ")}. These scores do not measure whether another piece blocks the view.`;
   $("#crop-inspector").hidden = false;
 });
+
+$("#camera-source").addEventListener("change",()=>{stopCamera(); $("#recognition-mode").value="model"; disarm(); updateControls();});
+async function toggleNative() {
+  if (stream) { stopCamera(); return; }
+  pending=true; updateControls();
+  try {
+    game=await api("/api/native/start",{corners:structuredClone(corners),threshold:Number($("#sensitivity").value)});
+    stream={native:true}; visionSession=null; candidate=null;
+    $("#video").hidden=true; $("#native-preview").hidden=false;
+    $("#empty-camera").hidden=true; viewport.style.aspectRatio="16 / 9";
+    cameraButton.textContent="Stop camera"; $("#camera-detail").textContent="Native CPU recognition · local evidence retention";
+    $("#capture-label").textContent="Starting native camera…";
+    nativeTimer=setInterval(pollNative,400); pollNative();
+  } catch(error) {setDecision("review","Native camera unavailable",error.message,"!");}
+  finally{pending=false;updateControls();}
+}
+async function pollNative() {
+  if (!stream?.native || nativePolling) return;
+  nativePolling=true;
+  try {
+    const state=await api("/api/native/status");
+    if (!stream?.native) return;
+    const health=state.health;
+    $("#capture-label").textContent=health?.state === "live" ? "Native camera live" : health?.state || "Camera stopped";
+    $("#timing").textContent=health ? `Camera PTS · ${health.overwritten} skipped · ${health.camera_dropped} capture drops` : "Stopped";
+    $("#model-status").textContent=health?.state === "live" ? `Native CPU · ${health.inference_ms} ms` : "Waiting";
+    if (health?.state === "live" && state.reading) {
+      lastFrameAt=performance.now();
+      $("#native-preview").src=`/api/native/preview.jpg?t=${health.capture_time_us}`;
+      $("#visibility").textContent=`${state.reading.squares.filter(s=>s.visible_probability>=.5).length}/64 usable squares`;
+      showModelReadout(state.reading);
+    }
+    if (!pending && (state.game.revision!==game.revision || state.game.moves.length!==game.moves.length)) { game=state.game; renderGame(); }
+    if (visionSession && !state.game.vision_session) {visionSession=null;candidate=null;setDecision("review","Reference required",state.decision.reason || health?.error || "Verify the physical position.","!");}
+    if (health?.state === "interrupted") {visionSession=null;candidate=null;setDecision("review","Capture interrupted",health.error,"!");}
+    const decision=state.decision;
+    if (visionSession && !pending && decision.kind === "candidate") {
+      const move=game.legal_moves.find(m=>m.uci===decision.uci);
+      if(move){candidate={...move,vision_session:decision.session_id,proposal_id:decision.proposal_id};$("#manual-move").value=move.uci;setDecision("review",`${move.san} detected`,"Review the model-supported move or enable automatic recording.","?",move);if($("#auto-record").checked && !document.hidden) recordMove(candidate,true);}
+    } else if (visionSession && !pending && decision.kind === "review") {candidate=null;setDecision("review","Position needs review",decision.reason,"!");}
+    else if (visionSession && !pending && decision.kind === "unchanged") {candidate=null;$("#manual-move").value="";setDecision("stable","Watching the pieces",`${game.turn} to move.`,"✓");}
+    updateControls();
+  } catch(error){if(stream?.native){visionSession=null;candidate=null;setDecision("review","Native recorder interrupted",error.message,"!");}}
+  finally{nativePolling=false;}
+}

@@ -11,4 +11,5 @@ fi
 if ! python3 scripts/setup-vision.py --check; then
   python3 scripts/setup-vision.py
 fi
+./scripts/build-native-camera.sh
 exec cargo run --offline -- serve "${1:-8770}"

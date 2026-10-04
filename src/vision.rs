@@ -182,6 +182,16 @@ impl VisionSession {
         })
     }
 
+    pub fn proposed(&self) -> Option<&ProposedMove> {
+        self.proposal.as_ref().map(|(_, p)| p)
+    }
+    pub fn last_observation(&self) -> &FrameObservation {
+        &self.last
+    }
+    pub fn is_fresh(&self) -> bool {
+        self.received.elapsed() <= Duration::from_secs(8)
+    }
+
     pub fn commit(&mut self, game: &ChessGame) -> Result<()> {
         self.decoder.commit(game)?;
         self.proposal = None;

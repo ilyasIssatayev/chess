@@ -1,0 +1,315 @@
+{
+  "generator": "python chess 1.11.2",
+  "cases": [
+    {
+      "name": "ordinary",
+      "initial_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "moves": [
+        {
+          "uci": "e2e4",
+          "san": "e4",
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        },
+        {
+          "uci": "e7e5",
+          "san": "e5",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2"
+        },
+        {
+          "uci": "g1f3",
+          "san": "Nf3",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"
+        },
+        {
+          "uci": "b8c6",
+          "san": "Nc6",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
+        },
+        {
+          "uci": "f1b5",
+          "san": "Bb5",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3"
+        },
+        {
+          "uci": "a7a6",
+          "san": "a6",
+          "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4"
+        },
+        {
+          "uci": "b5a4",
+          "san": "Ba4",
+          "fen": "r1bqkbnr/1ppp1ppp/p1n5/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 4"
+        },
+        {
+          "uci": "g8f6",
+          "san": "Nf6",
+          "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5"
+        },
+        {
+          "uci": "e1g1",
+          "san": "O-O",
+          "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 3 5"
+        },
+        {
+          "uci": "f8e7",
+          "san": "Be7",
+          "fen": "r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 4 6"
+        },
+        {
+          "uci": "f1e1",
+          "san": "Re1",
+          "fen": "r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQR1K1 b kq - 5 6"
+        },
+        {
+          "uci": "b7b5",
+          "san": "b5",
+          "fen": "r1bqk2r/2ppbppp/p1n2n2/1p2p3/B3P3/5N2/PPPP1PPP/RNBQR1K1 w kq b6 0 7"
+        },
+        {
+          "uci": "a4b3",
+          "san": "Bb3",
+          "fen": "r1bqk2r/2ppbppp/p1n2n2/1p2p3/4P3/1B3N2/PPPP1PPP/RNBQR1K1 b kq - 1 7"
+        },
+        {
+          "uci": "e8g8",
+          "san": "O-O",
+          "fen": "r1bq1rk1/2ppbppp/p1n2n2/1p2p3/4P3/1B3N2/PPPP1PPP/RNBQR1K1 w - - 2 8"
+        }
+      ],
+      "result": "*"
+    },
+    {
+      "name": "queenside-both",
+      "initial_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "moves": [
+        {
+          "uci": "d2d4",
+          "san": "d4",
+          "fen": "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 1"
+        },
+        {
+          "uci": "d7d5",
+          "san": "d5",
+          "fen": "rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w KQkq d6 0 2"
+        },
+        {
+          "uci": "b1c3",
+          "san": "Nc3",
+          "fen": "rnbqkbnr/ppp1pppp/8/3p4/3P4/2N5/PPP1PPPP/R1BQKBNR b KQkq - 1 2"
+        },
+        {
+          "uci": "b8c6",
+          "san": "Nc6",
+          "fen": "r1bqkbnr/ppp1pppp/2n5/3p4/3P4/2N5/PPP1PPPP/R1BQKBNR w KQkq - 2 3"
+        },
+        {
+          "uci": "c1f4",
+          "san": "Bf4",
+          "fen": "r1bqkbnr/ppp1pppp/2n5/3p4/3P1B2/2N5/PPP1PPPP/R2QKBNR b KQkq - 3 3"
+        },
+        {
+          "uci": "c8f5",
+          "san": "Bf5",
+          "fen": "r2qkbnr/ppp1pppp/2n5/3p1b2/3P1B2/2N5/PPP1PPPP/R2QKBNR w KQkq - 4 4"
+        },
+        {
+          "uci": "d1d2",
+          "san": "Qd2",
+          "fen": "r2qkbnr/ppp1pppp/2n5/3p1b2/3P1B2/2N5/PPPQPPPP/R3KBNR b KQkq - 5 4"
+        },
+        {
+          "uci": "d8d7",
+          "san": "Qd7",
+          "fen": "r3kbnr/pppqpppp/2n5/3p1b2/3P1B2/2N5/PPPQPPPP/R3KBNR w KQkq - 6 5"
+        },
+        {
+          "uci": "e1c1",
+          "san": "O-O-O",
+          "fen": "r3kbnr/pppqpppp/2n5/3p1b2/3P1B2/2N5/PPPQPPPP/2KR1BNR b kq - 7 5"
+        },
+        {
+          "uci": "e8c8",
+          "san": "O-O-O",
+          "fen": "2kr1bnr/pppqpppp/2n5/3p1b2/3P1B2/2N5/PPPQPPPP/2KR1BNR w - - 8 6"
+        }
+      ],
+      "result": "*"
+    },
+    {
+      "name": "en-passant",
+      "initial_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "moves": [
+        {
+          "uci": "e2e4",
+          "san": "e4",
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        },
+        {
+          "uci": "a7a6",
+          "san": "a6",
+          "fen": "rnbqkbnr/1ppppppp/p7/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+        },
+        {
+          "uci": "e4e5",
+          "san": "e5",
+          "fen": "rnbqkbnr/1ppppppp/p7/4P3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 2"
+        },
+        {
+          "uci": "d7d5",
+          "san": "d5",
+          "fen": "rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3"
+        },
+        {
+          "uci": "e5d6",
+          "san": "exd6",
+          "fen": "rnbqkbnr/1pp1pppp/p2P4/8/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 3"
+        }
+      ],
+      "result": "*"
+    },
+    {
+      "name": "white-promotion-q",
+      "initial_fen": "7k/P7/8/8/8/8/8/7K w - - 0 1",
+      "moves": [
+        {
+          "uci": "a7a8q",
+          "san": "a8=Q+",
+          "fen": "Q6k/8/8/8/8/8/8/7K b - - 0 1"
+        }
+      ],
+      "result": "*"
+    },
+    {
+      "name": "white-promotion-r",
+      "initial_fen": "7k/P7/8/8/8/8/8/7K w - - 0 1",
+      "moves": [
+        {
+          "uci": "a7a8r",
+          "san": "a8=R+",
+          "fen": "R6k/8/8/8/8/8/8/7K b - - 0 1"
+        }
+      ],
+      "result": "*"
+    },
+    {
+      "name": "white-promotion-b",
+      "initial_fen": "7k/P7/8/8/8/8/8/7K w - - 0 1",
+      "moves": [
+        {
+          "uci": "a7a8b",
+          "san": "a8=B",
+          "fen": "B6k/8/8/8/8/8/8/7K b - - 0 1"
+        }
+      ],
+      "result": "1/2-1/2"
+    },
+    {
+      "name": "white-promotion-n",
+      "initial_fen": "7k/P7/8/8/8/8/8/7K w - - 0 1",
+      "moves": [
+        {
+          "uci": "a7a8n",
+          "san": "a8=N",
+          "fen": "N6k/8/8/8/8/8/8/7K b - - 0 1"
+        }
+      ],
+      "result": "1/2-1/2"
+    },
+    {
+      "name": "black-promotion-q",
+      "initial_fen": "7k/8/8/8/8/8/p7/7K b - - 0 1",
+      "moves": [
+        {
+          "uci": "a2a1q",
+          "san": "a1=Q+",
+          "fen": "7k/8/8/8/8/8/8/q6K w - - 0 2"
+        }
+      ],
+      "result": "*"
+    },
+    {
+      "name": "black-promotion-r",
+      "initial_fen": "7k/8/8/8/8/8/p7/7K b - - 0 1",
+      "moves": [
+        {
+          "uci": "a2a1r",
+          "san": "a1=R+",
+          "fen": "7k/8/8/8/8/8/8/r6K w - - 0 2"
+        }
+      ],
+      "result": "*"
+    },
+    {
+      "name": "black-promotion-b",
+      "initial_fen": "7k/8/8/8/8/8/p7/7K b - - 0 1",
+      "moves": [
+        {
+          "uci": "a2a1b",
+          "san": "a1=B",
+          "fen": "7k/8/8/8/8/8/8/b6K w - - 0 2"
+        }
+      ],
+      "result": "1/2-1/2"
+    },
+    {
+      "name": "black-promotion-n",
+      "initial_fen": "7k/8/8/8/8/8/p7/7K b - - 0 1",
+      "moves": [
+        {
+          "uci": "a2a1n",
+          "san": "a1=N",
+          "fen": "7k/8/8/8/8/8/8/n6K w - - 0 2"
+        }
+      ],
+      "result": "1/2-1/2"
+    },
+    {
+      "name": "capture-promotion-q",
+      "initial_fen": "1r5k/P7/8/8/8/8/8/7K w - - 0 1",
+      "moves": [
+        {
+          "uci": "a7b8q",
+          "san": "axb8=Q+",
+          "fen": "1Q5k/8/8/8/8/8/8/7K b - - 0 1"
+        }
+      ],
+      "result": "*"
+    },
+    {
+      "name": "capture-promotion-r",
+      "initial_fen": "1r5k/P7/8/8/8/8/8/7K w - - 0 1",
+      "moves": [
+        {
+          "uci": "a7b8r",
+          "san": "axb8=R+",
+          "fen": "1R5k/8/8/8/8/8/8/7K b - - 0 1"
+        }
+      ],
+      "result": "*"
+    },
+    {
+      "name": "capture-promotion-b",
+      "initial_fen": "1r5k/P7/8/8/8/8/8/7K w - - 0 1",
+      "moves": [
+        {
+          "uci": "a7b8b",
+          "san": "axb8=B",
+          "fen": "1B5k/8/8/8/8/8/8/7K b - - 0 1"
+        }
+      ],
+      "result": "1/2-1/2"
+    },
+    {
+      "name": "capture-promotion-n",
+      "initial_fen": "1r5k/P7/8/8/8/8/8/7K w - - 0 1",
+      "moves": [
+        {
+          "uci": "a7b8n",
+          "san": "axb8=N",
+          "fen": "1N5k/8/8/8/8/8/8/7K b - - 0 1"
+        }
+      ],
+      "result": "1/2-1/2"
+    }
+  ]
+}

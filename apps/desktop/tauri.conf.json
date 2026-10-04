@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Chess Camera Recorder",
+  "version": "0.1.0",
+  "identifier": "com.local.chess-camera-recorder",
+  "build": { "frontendDist": "../recorder-ui-prototype" },
+  "app": { "windows": [], "security": { "csp": null } },
+  "bundle": { "active": false }
+}

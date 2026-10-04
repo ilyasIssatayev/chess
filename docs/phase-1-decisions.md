@@ -8,9 +8,9 @@ physical Phase 0 prerequisite remains open until a populated board is tested.
 - Rust 1.99.0, edition 2024, is pinned by `rust-toolchain.toml`.
 - Dependency resolution is pinned by the committed `Cargo.lock`.
 - The project is licensed under MIT; the full text is in `LICENSE`.
-- The planned desktop shell is Tauri. Capture, decoding, chess rules, storage,
+- The desktop shell is Tauri; its development candidate is implemented. Capture, decoding, chess rules, storage,
   and export remain Rust libraries so the shell does not own recorder state.
-- SQLite schema version 3 and journal event schema version 1 are the current
+- SQLite schema version 4 and journal event schema version 1 are the current
   durable formats. Schema changes require migrations; event payload changes
   require a new event schema version.
 

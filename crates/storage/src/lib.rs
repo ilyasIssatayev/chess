@@ -7,10 +7,11 @@ use contracts::{
     CaptureTimeUs, GameId, MoveProvenance, MoveRecord, MoveTiming, TimeBounds, TimingQuality,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 pub struct Store {
     connection: Connection,
@@ -50,13 +51,37 @@ pub struct ReplayedGame {
     pub moves: Vec<MoveRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RevisionInfo {
     pub revision: u32,
     pub parent_revision: Option<u32>,
     pub replace_from_ply: Option<u32>,
     pub reason: Option<String>,
     pub created_utc_us: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameSummary {
+    pub id: GameId,
+    pub created_utc_us: i64,
+    pub white: String,
+    pub black: String,
+    pub result: String,
+    pub status: String,
+    pub active_revision: u32,
+    pub ply_count: u32,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceRecord {
+    pub id: String,
+    pub game_id: GameId,
+    pub session_id: String,
+    pub capture_time_us: i64,
+    pub sha256: String,
+    pub bytes: u64,
+    pub model_version: String,
+    pub calibration_version: String,
+    pub kind: String,
 }
 
 impl Store {
@@ -83,6 +108,147 @@ impl Store {
     }
 
     /// Resume the most recently created game, including an empty recording.
+    pub fn games(&self) -> Result<Vec<GameSummary>, StorageError> {
+        let mut q = self.connection.prepare("SELECT g.id, g.created_utc_us, g.white, g.black, g.result, g.status, g.active_revision, (SELECT COUNT(*) FROM moves m WHERE m.game_id=g.id AND m.revision=g.active_revision) FROM games g ORDER BY g.created_utc_us DESC, g.id DESC")?;
+        let rows = q.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, u32>(6)?,
+                r.get::<_, u32>(7)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, created_utc_us, white, black, result, status, active_revision, ply_count) =
+                row?;
+            Ok(GameSummary {
+                id: GameId(
+                    Uuid::parse_str(&id)
+                        .map_err(|_| StorageError::InvalidCorrection("invalid stored ID".into()))?,
+                ),
+                created_utc_us,
+                white,
+                black,
+                result,
+                status,
+                active_revision,
+                ply_count,
+            })
+        })
+        .collect()
+    }
+
+    pub fn metadata(&self, id: GameId) -> Result<GameSummary, StorageError> {
+        self.games()?
+            .into_iter()
+            .find(|g| g.id == id)
+            .ok_or(StorageError::GameNotFound(id))
+    }
+
+    pub fn set_metadata(
+        &mut self,
+        id: GameId,
+        white: &str,
+        black: &str,
+        result: &str,
+        status: &str,
+        utc_us: i64,
+    ) -> Result<(), StorageError> {
+        if !["*", "1-0", "0-1", "1/2-1/2"].contains(&result)
+            || !["recording", "paused", "finished", "incomplete", "verified"].contains(&status)
+            || [white, black]
+                .iter()
+                .any(|v| v.len() > 200 || v.chars().any(char::is_control))
+        {
+            return Err(StorageError::InvalidCorrection(
+                "invalid game metadata".into(),
+            ));
+        }
+        // Verified status is reserved for a separate audited reference comparison.
+        if status == "verified" {
+            return Err(StorageError::InvalidCorrection(
+                "verification requires an audited reference".into(),
+            ));
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if tx.execute(
+            "UPDATE games SET white=?2, black=?3, result=?4, status=?5 WHERE id=?1",
+            params![id.0.to_string(), white, black, result, status],
+        )? != 1
+        {
+            return Err(StorageError::GameNotFound(id));
+        }
+        tx.execute("INSERT INTO activities(game_id, created_utc_us, kind, payload_json) VALUES (?1, ?2, 'metadata', ?3)", params![id.0.to_string(), utc_us, serde_json::to_string(&(white, black, result, status))?])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn activity(
+        &self,
+        id: GameId,
+        kind: &str,
+        payload: &serde_json::Value,
+        utc_us: i64,
+    ) -> Result<(), StorageError> {
+        self.connection.execute("INSERT INTO activities(game_id, created_utc_us, kind, payload_json) VALUES (?1, ?2, ?3, ?4)", params![id.0.to_string(), utc_us, kind, serde_json::to_string(payload)?])?;
+        Ok(())
+    }
+    pub fn activities(&self, id: GameId) -> Result<Vec<serde_json::Value>, StorageError> {
+        let mut q = self.connection.prepare("SELECT id, created_utc_us, kind, payload_json FROM activities WHERE game_id=?1 ORDER BY id")?;
+        let rows = q.query_map([id.0.to_string()], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })?;
+        rows.map(|r| { let (id, time, kind, payload) = r?; Ok(serde_json::json!({"id": id, "created_utc_us": time, "kind": kind, "payload": serde_json::from_str::<serde_json::Value>(&payload)?})) }).collect()
+    }
+    pub fn add_evidence(&self, evidence: &EvidenceRecord) -> Result<(), StorageError> {
+        self.connection.execute(
+            "INSERT INTO evidence(id, game_id, payload_json) VALUES (?1, ?2, ?3)",
+            params![
+                evidence.id,
+                evidence.game_id.0.to_string(),
+                serde_json::to_string(evidence)?
+            ],
+        )?;
+        Ok(())
+    }
+    pub fn evidence(&self, id: GameId) -> Result<Vec<EvidenceRecord>, StorageError> {
+        let mut q = self
+            .connection
+            .prepare("SELECT payload_json FROM evidence WHERE game_id=?1 ORDER BY rowid")?;
+        let rows = q.query_map([id.0.to_string()], |r| r.get::<_, String>(0))?;
+        rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
+    }
+    /// Immutable initial automatic decisions, including moves superseded by corrections.
+    pub fn original_decisions(&self, id: GameId) -> Result<Vec<MoveRecord>, StorageError> {
+        load_journal_events(&self.connection, id)?
+            .into_iter()
+            .filter(|e| e.event_type == "move_accepted")
+            .map(|e| Ok(serde_json::from_str::<MoveRecord>(&e.payload_json)?))
+            .collect()
+    }
+    /// SQLite creates a transactionally consistent snapshot including committed WAL pages.
+    pub fn backup_to(&self, destination: &Path) -> Result<(), StorageError> {
+        if destination.exists() {
+            return Err(StorageError::InvalidCorrection(
+                "backup destination exists".into(),
+            ));
+        }
+        self.connection
+            .execute("VACUUM INTO ?1", [destination.to_string_lossy().as_ref()])?;
+        Ok(())
+    }
+
     pub fn latest_game_id(&self) -> Result<Option<GameId>, StorageError> {
         let id: Option<String> = self
             .connection
@@ -607,6 +773,9 @@ impl Store {
             if current < 3 {
                 transaction.execute_batch(SCHEMA_V3)?;
             }
+            if current < 4 {
+                transaction.execute_batch(SCHEMA_V4)?;
+            }
             transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             transaction.commit()?;
         }
@@ -971,6 +1140,17 @@ CREATE TRIGGER revisions_are_immutable_before_delete
 BEFORE DELETE ON game_revisions BEGIN
     SELECT RAISE(ABORT, 'game revisions are immutable');
 END;
+"#;
+
+const SCHEMA_V4: &str = r#"
+ALTER TABLE games ADD COLUMN white TEXT NOT NULL DEFAULT '?';
+ALTER TABLE games ADD COLUMN black TEXT NOT NULL DEFAULT '?';
+CREATE TABLE activities(id INTEGER PRIMARY KEY, game_id TEXT NOT NULL REFERENCES games(id), created_utc_us INTEGER NOT NULL, kind TEXT NOT NULL, payload_json TEXT NOT NULL);
+CREATE TABLE evidence(id TEXT PRIMARY KEY, game_id TEXT NOT NULL REFERENCES games(id), payload_json TEXT NOT NULL);
+CREATE TRIGGER activities_no_update BEFORE UPDATE ON activities BEGIN SELECT RAISE(ABORT, 'activities are immutable'); END;
+CREATE TRIGGER activities_no_delete BEFORE DELETE ON activities BEGIN SELECT RAISE(ABORT, 'activities are immutable'); END;
+CREATE TRIGGER evidence_no_update BEFORE UPDATE ON evidence BEGIN SELECT RAISE(ABORT, 'evidence is immutable'); END;
+CREATE TRIGGER evidence_no_delete BEFORE DELETE ON evidence BEGIN SELECT RAISE(ABORT, 'evidence is immutable'); END;
 "#;
 
 #[derive(Debug, Error)]

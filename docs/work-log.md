@@ -4,6 +4,51 @@ Status updated on 4 October 2026. Productive time and aggregate token usage are 
 
 Local camera artifacts are stored below ignored `local-data/` and are intentionally absent from Git. This log omits the machine serial number, hardware UUID, and camera images.
 
+## Latest software checkpoint — 4 October
+
+The native live pipeline and packaged Tauri development candidate now exist.
+See [the desktop guide](desktop-recorder.md). F11–13 and F15–18 have substantial
+software implementations: acquisition timestamps, bounded processing, sampled
+hash-checked evidence, stale/gap reference invalidation, library/search, replay,
+metadata/finish/resume, audited earlier-move correction, timing JSON/CSV and
+annotated PGN, plus consistent backup and restoration into a new persistent
+profile. SQLite schema 4 adds metadata, append-only activities and evidence.
+Original automatic decisions remain in the immutable journal after correction.
+An independent python-chess 1.11.2 corpus now checks fifteen notation/FEN histories
+and parses the generated PGNs, including both castling sides, en passant and
+all promotion choices. Chess.com analysis imports were exercised for castling,
+en passant and knight promotion; the last case revealed that the importer can
+infer an insufficient-material draw when the original Result was `*`.
+
+
+A native 120-frame camera check measured 1920×1080, 29.48 fps and a maximum
+116,683 µs presentation-time interval without saving images. A short packaged
+native test passed CPU graph execution, preview, invalid-reference rejection and
+zero unintended commits. Observed inference readings included 472–677 ms;
+no physical board, accuracy or representative soak claim follows from that test.
+The packaged recorder and library were visually inspected. Desktop testing found
+and fixed speculative WebKit sockets blocking the single writer; request parsing
+now runs independently with bounded connections and queues. The lifecycle handler now exits the service when its window is destroyed and explicitly shows/focuses it on macOS ready/reopen. The final build reports a visible window and runs its local service, but the desktop automation tool returned `cgWindowNotFound`; final close/reopen visual verification remains open.
+
+F14, physical F02/F06–10 validation, complete physical export/import workflow qualification,
+F19 candidate freezing against a validated configuration, F20–21 accuracy and
+F22 clean-device/distribution checks remain open. The user confirmed that no
+physical-game recordings exist yet. `dist/ChessCameraRecorder.app` and its
+file-hash manifest are development artifacts, not a qualified release. Native
+personal heads and measured CoreML adoption remain separate optional work.
+No independent reviewer/subagents were used in this continuation.
+
+Validation: the workspace suite, strict Clippy, existing browser regressions plus
+seven library checks (35 JavaScript checks total), five Python preparation/original-decision regressions, 124 Rust tests, and
+changed-JavaScript parsing pass. The isolated HTTP walkthrough covers slow/idle
+connections, correction truncation, original-decision preservation, exports,
+consistent backup, non-destructive restoration and restored-profile restart.
+A native commit regression checks acquisition-time bounds, two durable supporting
+frames and restart without reusing an old completion interval. Build scripts
+create and verify the ad-hoc signed desktop bundle. Aggregate tokens and productive
+time remain unavailable.
+
+
 ## Current target
 
 | Item | Observed value |
@@ -13,7 +58,7 @@ Local camera artifacts are stored below ignored `local-data/` and are intentiona
 | Rust | rustc/cargo 1.99.0, project-local rustup installation |
 | Camera | Device 0, `MacBook Pro Camera` |
 | Negotiated mode | 1920×1080, 30 fps, YUYV |
-| Timestamp source | Process monotonic receipt time after blocking capture; native AVFoundation presentation timestamps are unavailable through the current adapter |
+| Timestamp source | Live Swift adapter: AVFoundation sample presentation times. Earlier Nokhwa probe: monotonic host receipt time. |
 | 120-frame cadence run | 30.359 observed fps, 52.383 ms maximum inter-arrival, 0 intervals above the 83.333 ms gap threshold |
 | RGB output check | One 1920×1080 P6 PPM decoded successfully; image contents were not added to Git |
 
@@ -23,14 +68,14 @@ Nokhwa 0.10.11 initially requested an unsupported 640×480@15 YUYV default and r
 
 | Frame | Status | Completed in this checkpoint | Checks and evidence | Remaining exact action |
 | --- | --- | --- | --- | --- |
-| F01 — Toolchain and camera probe | needs continuation | Rust workspace/toolchain established; permission grant, device enumeration, active-format negotiation, bounded cadence capture, RGB decode, raw timing reports, offline evidence verification, probe documentation, and ad-hoc signed app packaging implemented | `local-data/camera-probe/run-002` captured 120 frames at 30.359 observed fps with 0 threshold gaps; all three retained runs pass `capture-probe verify`; plist, entitlement, signature, and the packaged binary's granted-permission path verified on 3 October | Test packaged-app permission denial then recovery and interruption/disconnect behavior on the target Mac. Replace or supplement Nokhwa if native sample timestamps are required. |
+| F01 — Toolchain and camera probe | needs continuation | Rust workspace/toolchain established; permission grant, device enumeration, active-format negotiation, bounded cadence capture, RGB decode, raw timing reports, offline evidence verification, probe documentation, and ad-hoc signed app packaging implemented | `local-data/camera-probe/run-002` captured 120 frames at 30.359 observed fps with 0 threshold gaps; all three retained runs pass `capture-probe verify`; plist, entitlement, signature, and the packaged binary's granted-permission path verified on 3 October | Test packaged-app permission denial then recovery and interruption/disconnect behavior on the target Mac. Native sample timestamps are now supplied by the Swift adapter; qualify interruption recovery on physical sessions. |
 | F02 — Physical placement and feasibility | needs continuation | Evaluation manifest/schema, annotation procedure, and guided two-orientation collection script are ready | Manifest validator and capture evidence verifier have unit/integration tests; no board footage or accuracy figures were created | Run `scripts/collect-board-readiness.sh local-data/board-readiness/session-001` with a populated board, then record and annotate the scripted events in `docs/camera-probe.md` before the Phase 0 go/no-go decision. |
 | F03 — Workspace and contracts | implementation complete; awaiting F02 prerequisite | Rust workspace, pinned dependencies, MIT license text, accepted decisions, validated observation/move/timing contracts, evaluation fixtures, and synthetic observation → decoder → SQLite → rules replay → PGN checkpoint exist | The synthetic pipeline closes and reopens a file-backed database successfully; durable event schema and the provisional timestamp boundary are documented | After F02 passes, freeze the final native/host timestamp and persisted calibration-session contracts. |
-| F04 — Legal chess and notation | implementation complete; awaiting F02 prerequisite | `cozy-chess` adapter implements legal UCI transitions, SAN/FEN chains, atomic rebuilding, board piece classes, and explicit threefold/fivefold repetition policy | 23 tests cover checks/mate, every SAN disambiguation form, white/black castling, captures, en passant, every promotion choice, stalemate, malformed histories, halfmove-clock behavior, and repetition identity/counts | Add an independent cross-implementation reference corpus as defense in depth; it is not required by the written Phase 1 gate. |
-| F05 — Database journal and replay | implementation complete; awaiting F02 prerequisite | SQLite v3 migrations, rules-validated idempotent append, immutable correction revisions, append-only triggers, historical replay, and journal-versus-projection verification work | 13 storage tests cover restart, duplicates/conflicts, v1 migration, failed correction rollback, corrected suffixes, immutable history, replay, injected statement failures, and abrupt process termination during a WAL transaction | Re-run the integrated gate after F02 freezes the timestamp/session contracts. |
+| F04 — Legal chess and notation | implementation complete; awaiting F02 prerequisite | `cozy-chess` adapter implements legal UCI transitions, SAN/FEN chains, atomic rebuilding, board piece classes, and explicit threefold/fivefold repetition policy | 23 tests cover checks/mate, every SAN disambiguation form, white/black castling, captures, en passant, every promotion choice, stalemate, malformed histories, halfmove-clock behavior, and repetition identity/counts | Independent reference corpus and parsing of fifteen exported histories now pass. Re-run the integrated gate after F02 establishes the supported setup. |
+| F05 — Database journal and replay | implementation complete; awaiting F02 prerequisite | SQLite v4 migrations, rules-validated idempotent append, immutable correction revisions, append-only triggers, historical replay, and journal-versus-projection verification work | 13 storage tests cover restart, duplicates/conflicts, v1 migration, failed correction rollback, corrected suffixes, immutable history, replay, injected statement failures, and abrupt process termination during a WAL transaction | Re-run the integrated gate after F02 freezes the timestamp/session contracts. |
 | F06 — Offline playback and board calibration | tooling implemented; physical gate pending | Native-frame extraction with source/image hashes, preserved acquisition clocks, browser playback and a calibrated overlay; projective geometry validates labeled corners | Geometry, orientation, media-selection/hash/timeline and replay regressions pass; public recorded-photo pipeline runs actual neural graphs | Collect independent F02 development/validation clips; measure real mapping, lens distortion and physical recognition failures. |
 | F09 — Temporal move decoder | in progress (preparatory) | Synthetic state machine ranks unchanged plus legal successors, applies absolute/per-square/margin gates, requires full visibility for automatic moves, preserves conservative completion bounds, and latches on stream/session/model/calibration discontinuities | 8 tests cover a clear move, adjustment, hidden board, fully visible and partially hidden two-ply gaps, invalid thresholds, reset boundaries, and gap sequencing | Validate captures, compound moves, ambiguity, real visibility, gap recovery, and timing on sessions produced by F06–F08. Thresholds remain unqualified. |
-| F15 — Desktop recording screen | functional browser baseline; Tauri pending | Dependency-free interactive screen shows local camera preview, draggable four-corner projective calibration, geometry rejection/warnings, coarse motion state, changed squares, accepted/ambiguous decisions, timing/health placeholders, and trusted moves | Initial screen and live camera were visually inspected in Chrome; calibration JavaScript parses with the macOS JavaScript compiler and `git diff --check` passes | Browser now connects camera square changes to Rust rules, journaled moves, review, undo and PGN. Qualify the change detector on physical sessions and integrate piece evidence and versioned events in the Tauri shell. |
+| F15 — Desktop recording screen | packaged Tauri/native development candidate | Dependency-free interactive screen shows local camera preview, draggable four-corner projective calibration, geometry rejection/warnings, coarse motion state, changed squares, accepted/ambiguous decisions, timing/health placeholders, and trusted moves | Initial screen and live camera were visually inspected in Chrome; calibration JavaScript parses with the macOS JavaScript compiler and `git diff --check` passes | Browser now connects camera square changes to Rust rules, journaled moves, review, undo and PGN. Qualify the native pipeline and user workflow on physical sessions; the Tauri shell now integrates acquisition clocks, recognition and journaled evidence. |
 
 The Phase 1 software implementation gate passes: deterministic replay, legal notation, transactional/idempotent commits, special moves, repetition policy, restart, and abrupt-termination recovery are covered. The planned phase sequence still awaits the Phase 0 physical prerequisite, so Phase 1 is recorded as implementation-complete rather than physically unblocked. No move-recognition accuracy claim is possible until independent real sessions exist.
 
@@ -54,7 +99,10 @@ The Phase 1 software implementation gate passes: deterministic replay, legal not
 | F07 — Observations | Browser motion and neural evidence implemented | Independently measure square mapping, occupancy/color and occlusion failures on the supported board. |
 | F08 — Pretrained models and adaptation | Browser graphs/personal heads plus native CPU base-model inference and reference parity implemented | Independent side-camera validation and model selection; native personal heads, camera resampling and CoreML are unqualified. |
 | F10 — Timing, gaps and combined validation | Development replay/scoring tooling implemented | Combined physical move/timing validation, threshold freezing and later original live automatic-decision audit. |
-| F15 — Recording screen | Functional browser recorder with rules, saving, review/undo, export and training | Physical workflow validation and Tauri/native integration. |
+| F15 — Recording screen | Packaged Tauri shell with native and browser recording paths | Physical workflow and representative soak validation. |
+| F11–13 — Native timing, processing and evidence | Acquisition clocks, bounded queues, gaps and durable sampled evidence implemented | Annotated timing checks, sustained load and evidence-loss recovery on real sessions. |
+| F16–18 — Library, corrections and exports | Library/replay, immutable correction, sidecars and consistent backup/restore implemented | Complete physical game walkthrough and user-facing workflow qualification. |
+| F19–22 — Qualification and release | Development candidate hash manifest and original-decision audit tooling ready | Freeze a physically validated configuration, score held-out games and test distribution on a clean Mac. |
 
 The latest continuation used one coordinator with the inherited runtime model;
 no new helper agents were launched. Productive time/token totals and an independent
@@ -62,7 +110,7 @@ review of this continuation are unavailable. Physical phases remain open.
 
 ## Next coordinator action
 
-Run `scripts/collect-board-readiness.sh local-data/board-readiness/session-001` with the populated board, then capture the scripted F02 moves, annotate separate development/validation sessions, and decide Phase 0 feasibility. Also test F01 packaged-app denial/recovery and interruption behavior. Those recordings can now feed the implemented [offline replay and scoring workflow](offline-evaluation.md). Keep complete training/development and validation sessions separate. Measure side-camera errors before changing or freezing recognition thresholds. Native CPU base-model parity is now checked. The next independent software milestone is desktop integration with explicit native acquisition clocks and bounded frame processing; physical side-camera validation/model selection remains pending.
+Run `scripts/collect-board-readiness.sh local-data/board-readiness/session-001` with the populated board, then capture the scripted F02 moves, annotate separate development/validation sessions, and decide Phase 0 feasibility. Also test F01 packaged-app denial/recovery and interruption behavior. Those recordings can now feed the implemented [offline replay and scoring workflow](offline-evaluation.md). Keep complete training/development and validation sessions separate. Measure side-camera errors before changing or freezing recognition thresholds. Native CPU base-model parity is now checked. Desktop integration with native acquisition clocks and bounded processing now exists. The next prerequisite is physical feasibility, followed by independent side-camera validation/model selection and a representative sixty-minute soak.
 
 The 3 October Phase 1 completion reran formatting, the full offline workspace suite (**87 tests**), strict Clippy, the synthetic demo, and `git diff --check` with the project-local toolchain. The app bundle's code signature and granted camera-permission path also pass. Nokhwa's transitive `block 0.1.6` still emits a future-Rust incompatibility warning; keeping capture behind its adapter remains necessary.
 

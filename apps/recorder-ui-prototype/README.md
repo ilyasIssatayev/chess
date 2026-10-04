@@ -3,7 +3,11 @@
 The recorder now uses two pretrained photo classifiers to read square occupancy
 and piece identity from the live camera. It feeds normalized per-square evidence
 into the existing Rust temporal/legal-position decoder, then saves accepted
-moves in SQLite and exports canonical PGN. Camera images stay in the browser.
+moves in SQLite and exports canonical PGN. Browser camera images stay in the browser.
+The optional native camera source executes Rust CPU inference, uses AVFoundation
+presentation timestamps and retains sampled evidence locally. See the
+[desktop guide](../../docs/desktop-recorder.md) for native capture, library,
+replay, corrections, timing exports, backup/restore and the Tauri candidate.
 
 ## Run
 
@@ -122,7 +126,8 @@ They can mistake unfamiliar pieces, shallow views, shadows and occlusion. Crop
 coverage and output certainty gate usable evidence; they are **not** a learned
 hand/occlusion detector or a calibrated accuracy estimate. Physical-board
 move-recognition accuracy remains unqualified until independent recordings are
-annotated and evaluated. Move-completion timing remains unknown. Poor readings
+annotated and evaluated. Browser move-completion timing remains unknown. Native model-supported moves retain
+conservative bounds, which still need physical timing qualification. Poor readings
 fail closed and offer manual review; there is no silent fallback to automatic
 pixel-change guesses.
 

@@ -1,6 +1,6 @@
 # Chess camera recorder: phased development plan
 
-Planning baseline: 2 October 2026. Implementation progress and measured hardware results are tracked in [the work log](work-log.md). The repository now includes the functional browser recorder, local pretrained neural recognition, personal classifier-head adaptation, recorded-media playback with blind decoder scoring, and native CPU base-model inference checked against JavaScript preprocessing and ONNX reference outputs. Physical side-camera accuracy, model/pipeline selection and the Tauri shell remain open; phase gates remain governed by the evidence requirements below.
+Planning baseline: 2 October 2026. Implementation progress and measured hardware results are tracked in [the work log](work-log.md). The repository now includes the functional browser recorder, local pretrained neural recognition, personal classifier-head adaptation, recorded-media playback with blind decoder scoring, and native CPU base-model inference checked against JavaScript preprocessing and ONNX reference outputs. The Tauri shell, native live capture/recognition, sampled evidence, library/replay, correction, timing-export and backup/restore development workflows are now implemented. Physical side-camera accuracy, model/pipeline selection, full reliability qualification and release remain open; phase gates remain governed by the evidence requirements below.
 
 ## Goal and first release
 

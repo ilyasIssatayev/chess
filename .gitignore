@@ -3,3 +3,5 @@
 /camera-probe-output/
 /local-data/
 /dist/
+
+__pycache__/

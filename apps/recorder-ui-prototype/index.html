@@ -17,7 +17,7 @@
     </header>
 
     <p class="setup-guide">Start camera → calibrate the four board corners → match the physical position to the tracked board → set a reference. Then play one move at a time.</p>
-    <p class="evaluation-link"><a href="/evaluation.html">Replay a recording and evaluate recognition</a></p>
+    <p class="evaluation-link"><a href="/library.html">Game library, replay and corrections</a> · <a href="/evaluation.html">Replay a recording and evaluate recognition</a></p>
     <section class="layout">
       <div class="camera-column">
       <div class="camera-panel panel">
@@ -30,7 +30,7 @@
         </div>
 
         <div class="viewport" id="viewport">
-          <video id="video" autoplay muted playsinline></video>
+          <video id="video" autoplay muted playsinline></video><img id="native-preview" alt="Native camera preview" hidden>
           <div class="empty-camera" id="empty-camera">
             <div class="lens"></div>
             <p>Start the camera to check board placement</p>
@@ -56,6 +56,7 @@
 
     <section class="controls panel">
       <div class="control-group">
+        <label>Camera source <select id="camera-source"><option value="browser">Browser camera</option><option value="native">Native MacBook camera</option></select></label>
         <button class="primary" id="camera-button">Start camera</button>
         <button id="calibrate-button">Calibrate board</button>
         <button id="reset-calibration-button" hidden>Reset corners</button>

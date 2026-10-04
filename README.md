@@ -1,10 +1,12 @@
 # Chess camera recorder
 
-A local-first macOS application in progress. It uses the built-in MacBook camera to observe a physical chessboard, infer legal moves conservatively, preserve elapsed-time uncertainty, store games in SQLite, and export standard PGN for Chess.com analysis.
+A local-first macOS application in progress. A packaged Tauri development candidate now exists. It uses the built-in MacBook camera to observe a physical chessboard, infer legal moves conservatively, preserve elapsed-time uncertainty, store games in SQLite, and export standard PGN for Chess.com analysis.
 
 The implementation currently provides:
 
 - an AVFoundation camera feasibility probe with permission, device, format, frame, and cadence reporting;
+- a native camera-to-Rust CPU recording pipeline with presentation timestamps, bounded processing, sampled evidence and capture health;
+- a Tauri desktop shell, searchable game library, replay, audited corrections, timing exports and backup/restore;
 - shared observation, move, timing, evidence, and review contracts;
 - legal UCI move application with canonical SAN/FEN through `cozy-chess`;
 - local neural occupancy/piece recognition in a browser worker, with model-verified references and a camera readout;
@@ -75,4 +77,6 @@ review, SQLite persistence, undo and PGN export. Start it with `./scripts/start-
 <http://localhost:8770/>. Physical-board recognition uses pretrained photo models
 with optional browser-local classifier heads taught from confirmed positions.
 The crop inspector and side-view diagnostics help check camera setup. Recognition
-still needs qualification on the user's board before production Tauri integration.
+still needs qualification on the user's board. The [desktop candidate guide](docs/desktop-recorder.md)
+covers native capture, the packaged app, library/replay, evidence, exports and backup/restore.
+Build it with `./scripts/package-desktop.sh`, then open `dist/ChessCameraRecorder.app`.

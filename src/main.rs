@@ -8,10 +8,22 @@ use export::{PgnMetadata, to_pgn};
 use recorder_core::{DecoderConfig, DecoderDecision, TemporalDecoder};
 use storage::Store;
 
-mod server;
-mod vision;
+use chess_camera_recorder::{backup, server};
 
 fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("restore") {
+        let args: Vec<_> = std::env::args().collect();
+        anyhow::ensure!(
+            args.len() == 4,
+            "Usage: restore BACKUP_DIRECTORY NEW_DATA_DIRECTORY"
+        );
+        backup::restore(
+            std::path::Path::new(&args[2]),
+            std::path::Path::new(&args[3]),
+        )?;
+        println!("Restored validated database and evidence to {}", args[3]);
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("serve") {
         return server::run();
     }

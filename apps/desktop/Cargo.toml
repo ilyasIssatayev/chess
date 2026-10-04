@@ -1,0 +1,13 @@
+[package]
+name = "chess-desktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+chess-camera-recorder = { path = "../.." }
+tauri = { version = "=2.12.1", default-features = false, features = ["wry", "compression"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

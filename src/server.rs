@@ -1,8 +1,18 @@
-//! Small loopback-only adapter for the browser recorder. Camera images stay in JS;
-//! rules, canonical notation, journaled moves and PGN use the existing Rust core.
+//! Loopback-only recorder service for the browser and Tauri shell. Native capture,
+//! recognition, rules, evidence and persistence run locally in Rust.
+use crate::{
+    evidence::EvidenceStore,
+    native::{NativeCamera, Reading},
+};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+#[path = "server_workflows.rs"]
+mod workflows;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::vision::{MANIFEST, VisionSession};
@@ -17,46 +27,142 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use storage::{CorrectionRevision, Store};
 
-const UI: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/apps/recorder-ui-prototype");
-
+#[derive(Clone)]
+pub struct ServerConfig {
+    pub ui: PathBuf,
+    pub assets: PathBuf,
+    pub data: PathBuf,
+    pub camera_helper: PathBuf,
+}
+impl ServerConfig {
+    pub fn development() -> Self {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        Self {
+            ui: root.join("apps/recorder-ui-prototype"),
+            assets: root.join("local-data/vision"),
+            data: std::env::var_os("CHESS_RECORDER_DATA_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| root.join("local-data/recorder")),
+            camera_helper: root.join("target/native/chess-camera"),
+        }
+    }
+}
+pub struct ServerHandle {
+    pub port: u16,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl Drop for ServerHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+pub fn spawn(mut config: ServerConfig, port: u16) -> Result<ServerHandle> {
+    std::fs::create_dir_all(&config.data)?;
+    let base_data = config.data.clone();
+    if let Ok(profile) = std::fs::read_to_string(base_data.join("active-profile")) {
+        let id = uuid::Uuid::parse_str(profile.trim()).context("Invalid active profile")?;
+        config.data = base_data.join("profiles").join(id.to_string());
+        ensure!(
+            config.data.join("games.sqlite").is_file(),
+            "Active restored profile is missing"
+        );
+    }
+    let listener = TcpListener::bind(("127.0.0.1", port))?;
+    let port = listener.local_addr()?.port();
+    listener.set_nonblocking(true)?;
+    let mut app = App::open(Store::open(config.data.join("games.sqlite"))?)?;
+    app.evidence = Some(EvidenceStore::open(&config.data)?);
+    app.base_data = base_data;
+    app.config = config;
+    let stop = Arc::new(AtomicBool::new(false));
+    let quitting = stop.clone();
+    // Parse sockets off the recorder thread. WebKit opens speculative connections;
+    // an idle socket must never block acquisition, decoding, or other requests.
+    let (sender, receiver) =
+        std::sync::mpsc::sync_channel::<(Vec<u8>, std::sync::mpsc::SyncSender<Vec<u8>>)>(8);
+    let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let thread = std::thread::spawn(move || {
+        while !quitting.load(Ordering::Relaxed) {
+            if let Err(e) = app.process_native() {
+                app.vision = None;
+                app.previous_completion = None;
+                app.native_decision = json!({"kind":"review","reason":e.to_string()});
+            }
+            if let Ok((mut stream, _)) = listener.accept()
+                && connections.load(Ordering::Relaxed) < 8
+            {
+                connections.fetch_add(1, Ordering::Relaxed);
+                let active = connections.clone();
+                let messages = sender.clone();
+                std::thread::spawn(move || {
+                    let _ = stream.set_nonblocking(false);
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
+                    if let Ok(bytes) = read_packet(&mut stream) {
+                        let (reply, response) = std::sync::mpsc::sync_channel(1);
+                        if messages.try_send((bytes, reply)).is_ok()
+                            && let Ok(bytes) = response.recv_timeout(Duration::from_secs(10))
+                        {
+                            let _ = stream.write_all(&bytes);
+                        }
+                    }
+                    active.fetch_sub(1, Ordering::Relaxed);
+                });
+            }
+            if let Ok((bytes, reply)) = receiver.recv_timeout(Duration::from_millis(10)) {
+                let start = bytes.len();
+                let mut memory = std::io::Cursor::new(bytes);
+                if let Err(e) = serve_request(&mut memory, &mut app, port) {
+                    memory.set_position(start as u64);
+                    let _ = respond(
+                        &mut memory,
+                        400,
+                        "application/json",
+                        &serde_json::to_vec(&json!({"error":e.to_string()})).unwrap_or_default(),
+                    );
+                }
+                let _ = reply.send(memory.into_inner()[start..].to_vec());
+            }
+        }
+    });
+    Ok(ServerHandle {
+        port,
+        stop,
+        thread: Some(thread),
+    })
+}
 pub fn run() -> Result<()> {
-    let port: u16 = std::env::args()
+    let port = std::env::args()
         .nth(2)
         .map(|s| s.parse())
         .transpose()?
         .unwrap_or(8770);
-    let listener = TcpListener::bind(("127.0.0.1", port))
-        .context("bind local recorder; try `cargo run -- serve 8771` if the port is busy")?;
-    let data = std::env::var_os("CHESS_RECORDER_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("local-data/recorder"));
-    std::fs::create_dir_all(&data)?;
-    let mut app = App::open(Store::open(data.join("games.sqlite"))?)?;
-    println!("Recorder ready: http://localhost:{port}/apps/recorder-ui-prototype/");
-    println!(
-        "Games saved in {}. Camera frames stay in your browser.",
-        data.display()
-    );
-    for stream in listener.incoming() {
-        let mut stream = stream?;
-        stream.set_read_timeout(Some(Duration::from_secs(3)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(3)))?;
-        if let Err(error) = serve_request(&mut stream, &mut app, port) {
-            let _ = respond(
-                &mut stream,
-                400,
-                "application/json",
-                &serde_json::to_vec(&json!({"error": error.to_string()}))?,
-            );
-        }
+    let server = spawn(ServerConfig::development(), port)?;
+    println!("Recorder ready: http://localhost:{}/", server.port);
+    loop {
+        std::thread::park_timeout(Duration::from_secs(60));
     }
-    Ok(())
 }
 
 struct App {
     store: Store,
     game_id: GameId,
     vision: Option<VisionSession>,
+    config: ServerConfig,
+    base_data: PathBuf,
+    evidence: Option<EvidenceStore>,
+    native: Option<NativeCamera>,
+    last_reading: Option<Reading>,
+    last_trusted_reading: Option<Reading>,
+    native_decision: Value,
+    native_sequence: u64,
+    native_last_source: u64,
+    previous_completion: Option<(SessionId, contracts::TimeBounds)>,
+    last_evidence_at: i64,
 }
 
 #[derive(Deserialize)]
@@ -101,6 +207,17 @@ impl App {
             store,
             game_id,
             vision: None,
+            config: ServerConfig::development(),
+            base_data: ServerConfig::development().data,
+            evidence: None,
+            native: None,
+            last_reading: None,
+            last_trusted_reading: None,
+            native_decision: json!({"kind":"idle"}),
+            native_sequence: 0,
+            native_last_source: 0,
+            previous_completion: None,
+            last_evidence_at: -2_000_000,
         })
     }
 
@@ -127,6 +244,12 @@ impl App {
             "fen": game.fen(), "moves": replay.moves, "legal_moves": legal,
             "pieces": before, "turn": if game.fen().split_whitespace().nth(1) == Some("w") { "White" } else { "Black" },
             "status": format!("{:?}", game.status()),
+            "metadata":self.store.metadata(self.game_id)?,
+            "initial_fen":replay.initial_fen,
+            "revisions":self.store.revision_history(self.game_id)?,
+            "native": self.native.as_ref().map(NativeCamera::health),
+            "native_decision": self.native_decision,
+            "evidence_lost":self.evidence.as_ref().map_or(0,|e|e.lost),
         }))
     }
 
@@ -150,6 +273,10 @@ impl App {
     }
 
     fn begin_vision(&mut self, request: VisionRequest) -> Result<Value> {
+        ensure!(
+            self.store.metadata(self.game_id)?.status == "recording",
+            "Resume recording before setting a camera reference."
+        );
         let game = self.trusted_position(&request.position)?;
         // Clear any previous proposal even when a new reference fails.
         self.vision = None;
@@ -221,6 +348,51 @@ impl App {
                     .is_some_and(VisionSession::allows_automatic),
             "Personal recognition requires review. Confirm and record the suggested move manually."
         );
+        ensure!(
+            self.store.metadata(self.game_id)?.status != "finished",
+            "Resume this game before adding moves."
+        );
+        let proposed = if model_approved {
+            self.vision.as_ref().and_then(|s| s.proposed()).cloned()
+        } else {
+            None
+        };
+        let session_id = self.vision.as_ref().map(|s| s.id);
+        let native_supported = model_approved && session_id == self.native.as_ref().map(|c| c.id);
+        let timing = if native_supported {
+            let p = proposed.as_ref().context("No current proposal")?;
+            MoveTiming {
+                completion: Some(p.completion_bounds),
+                elapsed_since_previous: self
+                    .previous_completion
+                    .filter(|(id, _)| Some(*id) == session_id)
+                    .map(|(_, previous)| p.completion_bounds.elapsed_since(previous))
+                    .transpose()?,
+                confirmation_time: p.confirmation_time,
+                quality: TimingQuality::Bounded,
+            }
+        } else {
+            MoveTiming {
+                completion: None,
+                elapsed_since_previous: None,
+                confirmation_time: self
+                    .vision
+                    .as_ref()
+                    .map(|s| s.last_observation().capture_time)
+                    .unwrap_or(CaptureTimeUs::new(0)?),
+                quality: TimingQuality::Unknown,
+            }
+        };
+        let mut evidence_ids = vec![];
+        if native_supported {
+            if let (Some(evidence), Some(reading)) =
+                (&mut self.evidence, &self.last_trusted_reading)
+                && let Some(id) = evidence.save(&self.store, self.game_id, reading, "pre_move")?
+            {
+                evidence_ids.push(id);
+            }
+            evidence_ids.extend(self.save_current_evidence("accepted")?);
+        }
         let applied = game.play_uci(&request.uci)?.clone();
         let next_vision = if model_approved {
             let mut session = self.vision.clone().unwrap();
@@ -243,14 +415,8 @@ impl App {
                 MoveProvenance::Reviewed
             },
             confidence: None,
-            // Change detection has no qualified move-completion clock yet.
-            timing: MoveTiming {
-                completion: None,
-                elapsed_since_previous: None,
-                confirmation_time: CaptureTimeUs::new(0)?,
-                quality: TimingQuality::Unknown,
-            },
-            evidence_ids: vec![],
+            timing,
+            evidence_ids,
         };
         self.store.append_move(
             &format!(
@@ -260,7 +426,14 @@ impl App {
             &record,
             utc_us(),
         )?;
+        if native_supported {
+            self.previous_completion =
+                Some((session_id.unwrap(), proposed.unwrap().completion_bounds));
+        } else {
+            self.previous_completion = None;
+        }
         self.vision = next_vision;
+        self.native_decision = json!({"kind":"accepted","uci":record.uci});
         self.snapshot()
     }
 
@@ -296,19 +469,71 @@ impl App {
     }
 
     fn pgn(&self) -> Result<String> {
+        self.pgn_with_timing(false)
+    }
+    fn pgn_with_timing(&self, include_timing: bool) -> Result<String> {
         let replay = self.store.replay_active_game(self.game_id)?;
-        Ok(to_pgn(&PgnMetadata::default(), &replay.moves, false)?)
+        let m = self.store.metadata(self.game_id)?;
+        let metadata = PgnMetadata {
+            date: chrono::DateTime::from_timestamp_micros(m.created_utc_us)
+                .map(|d| d.format("%Y.%m.%d").to_string())
+                .unwrap_or_else(|| "????.??.??".into()),
+            white: m.white,
+            black: m.black,
+            result: if m.status == "incomplete" {
+                "*".into()
+            } else {
+                m.result
+            },
+            ..PgnMetadata::default()
+        };
+        let mut pgn = to_pgn(&metadata, &replay.moves, include_timing)?;
+        if m.status == "incomplete" {
+            pgn.push_str("{Incomplete recording: exported trusted prefix only.}\n");
+        }
+        Ok(pgn)
     }
 }
 
-fn utc_us() -> i64 {
+pub(crate) fn utc_us() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock after Unix epoch")
         .as_micros() as i64
 }
 
-fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()> {
+fn read_packet(stream: &mut TcpStream) -> Result<Vec<u8>> {
+    let mut reader = BufReader::new(stream);
+    let mut packet = Vec::new();
+    let mut length = None;
+    loop {
+        let mut line = Vec::new();
+        let count = reader.by_ref().take(8192).read_until(b'\n', &mut line)?;
+        ensure!(
+            count > 0 && line.ends_with(b"\n"),
+            "Incomplete HTTP headers"
+        );
+        packet.extend(&line);
+        ensure!(packet.len() <= 16384, "Headers too large");
+        if line == b"\r\n" {
+            break;
+        }
+        if let Some((name, value)) = std::str::from_utf8(&line)?.trim().split_once(':')
+            && name.eq_ignore_ascii_case("content-length")
+        {
+            ensure!(length.is_none(), "Duplicate Content-Length");
+            length = Some(value.trim().parse::<usize>()?);
+        }
+    }
+    let length = length.unwrap_or(0);
+    ensure!(length <= 65536, "Request too large");
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body)?;
+    packet.extend(body);
+    Ok(packet)
+}
+
+fn serve_request<T: Read + Write>(stream: &mut T, app: &mut App, port: u16) -> Result<()> {
     let mut reader = BufReader::new(&mut *stream);
     let mut line = String::new();
     reader.by_ref().take(8192).read_line(&mut line)?;
@@ -360,6 +585,9 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
                 "Cross-origin writes are not allowed"
             );
         }
+    }
+    if let Some((mime, bytes)) = app.extra_route(&method, &path, &body)? {
+        return respond(stream, 200, &mime, &bytes);
     }
     let value = match (method.as_str(), path.as_str()) {
         ("GET", "/api/game") => Some(app.snapshot()?),
@@ -423,7 +651,7 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
                     stream,
                     200,
                     "text/html",
-                    &std::fs::read(Path::new(UI).join("tests/vision-smoke.html"))?,
+                    &std::fs::read(app.config.ui.join("tests/vision-smoke.html"))?,
                 );
             }
             if path == "/vision-fixture.jpg" {
@@ -460,9 +688,7 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
             _ => None,
         };
         if let Some((file, mime)) = model_asset {
-            let asset = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("local-data/vision")
-                .join(file);
+            let asset = app.config.assets.join(file);
             return match std::fs::read(asset) {
                 Ok(bytes) => respond(stream, 200, mime, &bytes),
                 Err(_) => respond(
@@ -475,6 +701,9 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
         }
     }
     let asset = match path.as_str() {
+        "/library.html" => Some(("library.html", "text/html")),
+        "/library.js" => Some(("library.js", "text/javascript")),
+        "/library-core.js" => Some(("library-core.js", "text/javascript")),
         "/evaluation.html" => Some(("evaluation.html", "text/html")),
         "/evaluation.js" => Some(("evaluation.js", "text/javascript")),
         "/evaluation-core.js" => Some(("evaluation-core.js", "text/javascript")),
@@ -507,12 +736,12 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
     if method == "GET"
         && let Some((file, mime)) = asset
     {
-        return respond(stream, 200, mime, &std::fs::read(Path::new(UI).join(file))?);
+        return respond(stream, 200, mime, &std::fs::read(app.config.ui.join(file))?);
     }
     respond(stream, 404, "application/json", br#"{"error":"Not found"}"#)
 }
 
-fn respond(stream: &mut TcpStream, status: u16, mime: &str, body: &[u8]) -> Result<()> {
+fn respond(stream: &mut impl Write, status: u16, mime: &str, body: &[u8]) -> Result<()> {
     let label = match status {
         200 => "OK",
         404 => "Not Found",
