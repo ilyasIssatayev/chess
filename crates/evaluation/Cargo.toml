@@ -14,5 +14,9 @@ name = "manifest-check"
 path = "src/bin/manifest-check.rs"
 
 [dependencies]
+anyhow.workspace = true
+chess-core = { path = "../chess-core" }
+contracts = { path = "../contracts" }
+recorder-core = { path = "../recorder-core" }
 serde.workspace = true
 serde_json.workspace = true

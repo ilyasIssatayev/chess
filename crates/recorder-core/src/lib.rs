@@ -5,9 +5,11 @@ use chess_core::{ChessError, ChessGame};
 use contracts::{
     CaptureTimeUs, ContractError, FrameObservation, PieceClass, SessionId, TimeBounds,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DecoderConfig {
     pub settle_time_us: i64,
     pub min_visible_squares: usize,

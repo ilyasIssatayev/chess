@@ -133,6 +133,15 @@ private camera data. Normalized evidence, model version, calibration version,
 session identity, monotonic time, observation sequence, position revision and
 proposal freshness are checked before accepting automatic moves.
 
+## Replay recorded camera evidence
+
+Open <http://localhost:8770/evaluation.html> to inspect and replay a prepared
+annotated clip. [The offline evaluation guide](../../docs/offline-evaluation.md)
+covers frame extraction, hash checks, preserved capture clocks, observation
+exports and Rust move/timing scoring. This page uses the base models and does not
+write saved games. Independent physical recordings are still needed to measure
+the user's side-camera accuracy.
+
 ## Checks
 
 ```sh
@@ -148,6 +157,11 @@ cargo clippy --offline --workspace --all-targets -- -D warnings
 /System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc \
   apps/recorder-ui-prototype/recorder.js \
   apps/recorder-ui-prototype/tests/recorder.test.js
+/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc \
+  apps/recorder-ui-prototype/vision-core.js \
+  apps/recorder-ui-prototype/evaluation-core.js \
+  apps/recorder-ui-prototype/tests/evaluation-core.test.js
+python3 -m unittest discover -s scripts/tests
 ```
 
 Neural regressions cover rotations, reflected labels, projective sampling,

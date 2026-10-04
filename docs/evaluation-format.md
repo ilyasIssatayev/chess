@@ -1,6 +1,6 @@
 # Evaluation manifest format
 
-The evaluation manifest is the versioned input contract for deterministic playback and scoring of annotated chess-camera sessions. The initial implementation lives in `crates/evaluation`; it is self-contained until the root Cargo workspace is created in Frame 3.
+The evaluation manifest is the versioned input contract for deterministic playback and scoring of annotated chess-camera sessions. The implementation lives in `crates/evaluation` within the Rust workspace. The [offline evaluation guide](offline-evaluation.md) covers native-frame preparation, browser model playback and blind decoder scoring. Manifest validation alone does not measure recognition accuracy.
 
 This format records ground truth and dataset membership. It does not claim that any camera recording exists, that a placement is feasible, or that an accuracy target has been measured. The checked-in JSON is a schema example only.
 

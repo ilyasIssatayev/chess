@@ -17,6 +17,7 @@ members = [
     "crates/storage",
     "crates/export",
     "crates/vision-geometry",
+    "crates/vision-inference",
 ]
 
 [workspace.package]

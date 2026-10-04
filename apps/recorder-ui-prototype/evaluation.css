@@ -1,0 +1,19 @@
+a { color: var(--green); }
+.eval-setup { padding: 20px; margin: 18px 0; }
+.eval-setup h2 { font-size: 20px; }
+.eval-setup p, .eval-readout p { color: var(--muted); }
+.eval-setup label { display: block; margin-block: 12px; }
+.eval-setup input[type=number] { width: 80px; }
+.file-label input { display: block; margin-top: 10px; }
+progress { width: 100%; accent-color: var(--green); }
+.eval-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 18px; }
+.eval-image { position: relative; }
+.eval-image canvas { display: block; width: 100%; }
+#eval-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+#eval-overlay .grid-line { stroke:#6deaa4cc; stroke-width:1.5; }
+.eval-navigation, #frame-detail { margin: 16px; }
+.eval-readout { padding: 20px; align-self: start; }
+.eval-readout .tracked-board { margin-top: 16px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+@media(max-width:850px) { .eval-layout { grid-template-columns: 1fr; } .eval-readout { max-width: 420px; } }
+#trace-json { width:100%; min-height:150px; margin-top:8px; font:12px monospace; resize:vertical; }

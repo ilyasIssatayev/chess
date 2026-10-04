@@ -8,11 +8,15 @@ The implementation currently provides:
 - shared observation, move, timing, evidence, and review contracts;
 - legal UCI move application with canonical SAN/FEN through `cozy-chess`;
 - local neural occupancy/piece recognition in a browser worker, with model-verified references and a camera readout;
+- native Rust CPU recognition with checked JavaScript preprocessing and ONNX
+  reference-output parity on the target Mac;
 - a conservative temporal decoder that compares unchanged and legal-successor positions;
 - validated four-corner projective geometry for manual board calibration;
 - transactional SQLite game/event/move storage;
 - PGN export with optional descriptive timing comments; and
-- session-separated evaluation manifests with leakage and annotation validation.
+- session-separated evaluation manifests with leakage and annotation validation;
+- hash-verified recorded-media playback, local neural observation export and blind
+  Rust decoder scoring with move and completion-interval reports.
 
 The built-in camera has been exercised on the target Mac, but physical chessboard placement and end-to-end vision accuracy have not been qualified. The recorder must abstain and request review when evidence is ambiguous.
 
@@ -54,6 +58,13 @@ The preparatory [manual geometry guide](docs/geometry.md) describes the labeled-
 ## Project status and plan
 
 The [development plan](docs/development-plan.md) defines the architecture, 22 five-hour work frames, model assignments, phase gates, accuracy targets, and database/export behavior. The [work log](docs/work-log.md) records measured progress and remaining hardware dependencies. Evaluation recordings use the versioned [annotation manifest format](docs/evaluation-format.md).
+
+The [offline evaluation guide](docs/offline-evaluation.md) explains preparing
+annotated clips, replaying their camera evidence and measuring move errors without
+repeating the physical game by hand.
+
+The [native recognition guide](docs/native-vision.md) covers installing the
+verified CPU runtime, running Rust photo recognition and reproducing parity.
 
 The accepted workspace, persistence, result, and provisional timestamp choices
 are recorded in the [Phase 1 decisions](docs/phase-1-decisions.md).

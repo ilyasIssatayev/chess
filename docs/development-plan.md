@@ -1,6 +1,6 @@
 # Chess camera recorder: phased development plan
 
-Planning baseline: 2 October 2026. Implementation progress and measured hardware results are tracked in [the work log](work-log.md). The repository now contains the Rust workspace, camera probe, shared contracts, chess/storage/export foundations, evaluation tooling, manual board geometry, and a synthetic temporal-decoder baseline; phase gates remain governed by the evidence requirements below.
+Planning baseline: 2 October 2026. Implementation progress and measured hardware results are tracked in [the work log](work-log.md). The repository now includes the functional browser recorder, local pretrained neural recognition, personal classifier-head adaptation, recorded-media playback with blind decoder scoring, and native CPU base-model inference checked against JavaScript preprocessing and ONNX reference outputs. Physical side-camera accuracy, model/pipeline selection and the Tauri shell remain open; phase gates remain governed by the evidence requirements below.
 
 ## Goal and first release
 
@@ -179,6 +179,11 @@ All frames are initially **planned**. Begin each dependent frame only after its 
 
 #### Frame 6 — Offline playback and board calibration · Phase 2
 
+Preparatory implementation now includes hash-verified native-frame extraction,
+browser replay with acquisition clocks and a calibrated overlay. See the
+[offline evaluation guide](offline-evaluation.md). Independent F02 development
+and validation recordings and real mapping measurements are still required.
+
 **Models:** lead `Sol/M`; optional `Luna/H` for dataset-manifest tooling.
 
 1. Replay timestamped development clips deterministically.
@@ -199,6 +204,13 @@ All frames are initially **planned**. Begin each dependent frame only after its 
 
 #### Frame 8 — Pretrained model and Rust parity · Phase 2
 
+Preparatory native CPU base-model inference and parity tooling are implemented.
+The [native recognition guide](native-vision.md) defines the decoded-RGBA boundary,
+pinned runtime, reference tests and remaining limits. Independent physical
+observation/model comparison and provisional pipeline selection are still required
+before the Phase 2 gate. Personal-head native execution and CoreML remain separate
+work; the existing browser uses its current model worker.
+
 **Models:** lead `Sol/M`; optional `Luna/H` for artifact provenance and documentation lookup.
 
 1. Audit/download ChessCog candidates and record artifact terms, hashes and preprocessing.
@@ -218,6 +230,12 @@ All frames are initially **planned**. Begin each dependent frame only after its 
 **Checkpoint:** offline decoder emits trusted moves or explicit review items without inventing intermediate moves.
 
 #### Frame 10 — Timing, gaps and combined validation · Phase 3
+
+Preparatory scoring now reports blind decoder commits, wrong/missing moves,
+capture discontinuities and completion-interval comparisons from full exported
+observation traces. Synthetic regressions pass; combined physical validation and
+threshold freezing are still pending. This scorer is not the original automatic
+decision audit required for qualification.
 
 **Models:** lead `Sol/H`; optional `Luna/H` for annotated timing fixtures; optional bounded `Astra/M` review of decoder/timing assumptions.
 

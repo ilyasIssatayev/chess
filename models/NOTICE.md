@@ -29,6 +29,13 @@ Runtime: Microsoft ONNX Runtime Web 1.23.2, MIT. Its official npm archive's
 SHA-512 integrity and individual extracted asset SHA-256 hashes are pinned in
 `vision-manifest.json`. No arbitrary archive paths are extracted.
 
+Native CPU runtime: Microsoft ONNX Runtime 1.23.2, MIT, official macOS arm64
+release archive. Archive/library/license hashes are pinned in
+`native-runtime.json`; the original license is installed beside the library.
+The Rust adapter uses `ort` 2.0.0-rc.10 (MIT OR Apache-2.0) with build-time binary
+downloads disabled. The Rust crop port retains the same preprocessing attribution
+above. Native weights and runtime binaries remain in ignored local storage.
+
 Browser smoke-photo fixture: samryan18/chess-dataset, © 2019 Samuel Ryan,
 Mukund Venkateswaran, Kurt Convey, Michael Deng (MIT), via the pinned CrispChess
 fixture. The source licence is retained beside the downloaded test photo.

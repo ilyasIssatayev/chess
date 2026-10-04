@@ -1,0 +1,21 @@
+{
+  "version": "1.23.2",
+  "platform": "macos-arm64",
+  "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/onnxruntime-osx-arm64-1.23.2.tgz",
+  "archive_sha256": "b4d513ab2b26f088c66891dbbc1408166708773d7cc4163de7bdca0e9bbb7856",
+  "archive_bytes": 9999931,
+  "files": [
+    {
+      "file": "libonnxruntime.1.23.2.dylib",
+      "member": "./onnxruntime-osx-arm64-1.23.2/lib/libonnxruntime.1.23.2.dylib",
+      "sha256": "d306d2bc768540766c7ed8a1e0ff05d2870c77a934ebeee4a7bafa1b732ef299",
+      "bytes": 35138784
+    },
+    {
+      "file": "LICENSE",
+      "member": "./onnxruntime-osx-arm64-1.23.2/LICENSE",
+      "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+      "bytes": 1073
+    }
+  ]
+}

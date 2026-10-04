@@ -392,6 +392,32 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
     }
     if method == "GET" {
         if std::env::var_os("CHESS_RECORDER_TEST_MODE").is_some() {
+            if let Some(file) = path.strip_prefix("/evaluation-fixture/") {
+                let png = file
+                    .strip_prefix("frames/")
+                    .and_then(|name| name.strip_suffix(".png"));
+                let allowed = file == "bundle.json"
+                    || png.is_some_and(|name| {
+                        name.len() == 6 && name.bytes().all(|b| b.is_ascii_digit())
+                    });
+                if allowed {
+                    let bytes = std::fs::read(
+                        Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("local-data/offline-evaluation-check/prepared")
+                            .join(file),
+                    )?;
+                    return respond(
+                        stream,
+                        200,
+                        if file == "bundle.json" {
+                            "application/json"
+                        } else {
+                            "image/png"
+                        },
+                        &bytes,
+                    );
+                }
+            }
             if path == "/vision-smoke.html" {
                 return respond(
                     stream,
@@ -449,6 +475,10 @@ fn serve_request(stream: &mut TcpStream, app: &mut App, port: u16) -> Result<()>
         }
     }
     let asset = match path.as_str() {
+        "/evaluation.html" => Some(("evaluation.html", "text/html")),
+        "/evaluation.js" => Some(("evaluation.js", "text/javascript")),
+        "/evaluation-core.js" => Some(("evaluation-core.js", "text/javascript")),
+        "/evaluation.css" => Some(("evaluation.css", "text/css")),
         "/" | "/apps/recorder-ui-prototype/" | "/apps/recorder-ui-prototype/index.html" => {
             Some(("index.html", "text/html"))
         }

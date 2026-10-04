@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde.workspace = true
 chess-core = { path = "../chess-core" }
 contracts = { path = "../contracts" }
 thiserror.workspace = true

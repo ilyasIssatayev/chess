@@ -10,6 +10,7 @@
   --red: #ff7369;
   --blue: #77a9ff;
 }
+.evaluation-link a { color: var(--green); font-size: 13px; }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }

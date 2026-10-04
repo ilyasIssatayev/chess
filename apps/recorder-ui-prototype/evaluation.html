@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Offline camera evaluation</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/evaluation.css"></head>
+<body><main class="shell">
+<header><div><p class="eyebrow">CHESS CAMERA RECORDER</p><h1>Offline camera evaluation</h1></div><a href="/">Back to live recorder</a></header>
+<p>Replay a prepared recording with fixed acquisition timestamps. Images stay in this browser, and this page never changes saved games.</p>
+<section class="panel eval-setup">
+<label class="file-label">Prepared recording folder <input id="bundle-files" type="file" webkitdirectory multiple></label>
+<p>Prepare a short annotated clip with <code>python3 scripts/prepare-evaluation.py manifest.json output-folder</code>, then select its output folder. Each frame is verified against its saved hash.</p>
+<p id="bundle-status" aria-live="polite">No recording loaded.</p>
+<label>Motion threshold <input id="threshold" type="number" min="6" max="24" value="10"></label>
+<div class="control-group"><button class="primary" id="run" disabled>Replay recognition</button><button id="cancel" disabled>Cancel</button><button id="download" disabled>Download observations</button></div>
+<p id="run-status" aria-live="polite">Loading the local neural models…</p>
+<progress id="progress" value="0" max="1"></progress>
+<details id="trace-details" hidden><summary>Inspect or copy the exported observations</summary><label>Observation JSON <textarea id="trace-json" readonly spellcheck="false"></textarea></label><p>This is the same complete trace as the download. You can copy it into a JSON file if downloads are unavailable.</p></details>
+</section>
+<section class="eval-layout">
+<div class="panel eval-preview"><div class="panel-heading"><strong id="frame-label">Recording frame</strong><span id="clock-label">Capture time unknown</span></div><div class="eval-image"><canvas id="frame-canvas"></canvas><svg id="eval-overlay" aria-label="Calibrated recording grid"></svg></div><div class="control-group eval-navigation"><button id="previous" disabled>Previous frame</button><button id="next" disabled>Next frame</button></div><p id="frame-detail"></p></div>
+<aside class="panel eval-readout"><span class="section-label">NEURAL READOUT</span><div id="eval-board" class="tracked-board" aria-label="Recognized recording position"></div><p id="model-detail">Load a recording to inspect individual frames.</p><p>Amber squares indicate weak or cropped evidence. Model certainty does not establish whether another piece blocks the view.</p></aside>
+</section>
+<section class="panel eval-setup"><h2>Score the decoded moves</h2><p>After downloading the complete observation trace, run:</p><pre>cargo run --offline -p chess-evaluation --bin observation-replay -- manifest.json observations.json &gt; report.json</pre><p>The Rust decoder runs without consulting reference moves. The report compares its committed history with annotations, counts incorrect or missing moves, reports gaps and compares completion intervals. Processing latency never replaces acquisition time.</p><p>This development workflow uses the base model and its own observation policy. It does not qualify side-camera accuracy or replace the audit of original live automatic decisions required for release.</p></section>
+</main><script src="/recorder.js"></script><script src="/vision-core.js"></script><script src="/vision-client.js"></script><script src="/evaluation-core.js"></script><script src="/evaluation.js"></script></body></html>

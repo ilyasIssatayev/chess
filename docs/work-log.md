@@ -1,6 +1,6 @@
 # Development work log
 
-Status updated on 3 October 2026. Productive time and aggregate token usage are unavailable from the current client, so they are recorded as unknown rather than estimated. The initial wave used the current Codex runtime; helpers inherited the lead model because no override was selected.
+Status updated on 4 October 2026. Productive time and aggregate token usage are unavailable from the current client, so they are recorded as unknown rather than estimated. The initial wave used the current Codex runtime; helpers inherited the lead model because no override was selected.
 
 Local camera artifacts are stored below ignored `local-data/` and are intentionally absent from Git. This log omits the machine serial number, hardware UUID, and camera images.
 
@@ -28,13 +28,13 @@ Nokhwa 0.10.11 initially requested an unsupported 640×480@15 YUYV default and r
 | F03 — Workspace and contracts | implementation complete; awaiting F02 prerequisite | Rust workspace, pinned dependencies, MIT license text, accepted decisions, validated observation/move/timing contracts, evaluation fixtures, and synthetic observation → decoder → SQLite → rules replay → PGN checkpoint exist | The synthetic pipeline closes and reopens a file-backed database successfully; durable event schema and the provisional timestamp boundary are documented | After F02 passes, freeze the final native/host timestamp and persisted calibration-session contracts. |
 | F04 — Legal chess and notation | implementation complete; awaiting F02 prerequisite | `cozy-chess` adapter implements legal UCI transitions, SAN/FEN chains, atomic rebuilding, board piece classes, and explicit threefold/fivefold repetition policy | 23 tests cover checks/mate, every SAN disambiguation form, white/black castling, captures, en passant, every promotion choice, stalemate, malformed histories, halfmove-clock behavior, and repetition identity/counts | Add an independent cross-implementation reference corpus as defense in depth; it is not required by the written Phase 1 gate. |
 | F05 — Database journal and replay | implementation complete; awaiting F02 prerequisite | SQLite v3 migrations, rules-validated idempotent append, immutable correction revisions, append-only triggers, historical replay, and journal-versus-projection verification work | 13 storage tests cover restart, duplicates/conflicts, v1 migration, failed correction rollback, corrected suffixes, immutable history, replay, injected statement failures, and abrupt process termination during a WAL transaction | Re-run the integrated gate after F02 freezes the timestamp/session contracts. |
-| F06 — Offline playback and board calibration | in progress (preparatory) | `vision-geometry` validates manually labeled corners and maps board/image points plus square centers/polygons through an invertible homography | 7 synthetic tests cover skew, both labeled orientations, invalid polygons/inputs, round trips, and projection range | Build deterministic media playback and a calibration overlay; measure real corner reprojection and lens distortion using separate F02 recordings. |
+| F06 — Offline playback and board calibration | tooling implemented; physical gate pending | Native-frame extraction with source/image hashes, preserved acquisition clocks, browser playback and a calibrated overlay; projective geometry validates labeled corners | Geometry, orientation, media-selection/hash/timeline and replay regressions pass; public recorded-photo pipeline runs actual neural graphs | Collect independent F02 development/validation clips; measure real mapping, lens distortion and physical recognition failures. |
 | F09 — Temporal move decoder | in progress (preparatory) | Synthetic state machine ranks unchanged plus legal successors, applies absolute/per-square/margin gates, requires full visibility for automatic moves, preserves conservative completion bounds, and latches on stream/session/model/calibration discontinuities | 8 tests cover a clear move, adjustment, hidden board, fully visible and partially hidden two-ply gaps, invalid thresholds, reset boundaries, and gap sequencing | Validate captures, compound moves, ambiguity, real visibility, gap recovery, and timing on sessions produced by F06–F08. Thresholds remain unqualified. |
 | F15 — Desktop recording screen | functional browser baseline; Tauri pending | Dependency-free interactive screen shows local camera preview, draggable four-corner projective calibration, geometry rejection/warnings, coarse motion state, changed squares, accepted/ambiguous decisions, timing/health placeholders, and trusted moves | Initial screen and live camera were visually inspected in Chrome; calibration JavaScript parses with the macOS JavaScript compiler and `git diff --check` passes | Browser now connects camera square changes to Rust rules, journaled moves, review, undo and PGN. Qualify the change detector on physical sessions and integrate piece evidence and versioned events in the Tauri shell. |
 
 The Phase 1 software implementation gate passes: deterministic replay, legal notation, transactional/idempotent commits, special moves, repetition policy, restart, and abrupt-termination recovery are covered. The planned phase sequence still awaits the Phase 0 physical prerequisite, so Phase 1 is recorded as implementation-complete rather than physically unblocked. No move-recognition accuracy claim is possible until independent real sessions exist.
 
-## Current multi-agent wave
+## Earlier multi-agent waves
 
 | Role | Scope | Result |
 | --- | --- | --- |
@@ -47,9 +47,22 @@ The Phase 1 software implementation gate passes: deterministic replay, legal not
 | Independent Phase 1 reviewer | Read-only contracts/rules/export/decoder review | Found unsafe hidden-gap/session behavior, unvalidated decoder thresholds, weak export validation, custom-FEN numbering, tag injection, and projection overflow; fixes and regressions were added. |
 | Phase 1 completion wave | Rules, storage fault injection, camera evidence readiness, decisions | Added explicit repetition claims, abrupt-termination recovery coverage, offline camera evidence verification, a guided board collection script, the MIT license text, and the Phase 1 decision record. |
 
+## Current recognition and evaluation progress
+
+| Frame | Status | Remaining gate |
+| --- | --- | --- |
+| F07 — Observations | Browser motion and neural evidence implemented | Independently measure square mapping, occupancy/color and occlusion failures on the supported board. |
+| F08 — Pretrained models and adaptation | Browser graphs/personal heads plus native CPU base-model inference and reference parity implemented | Independent side-camera validation and model selection; native personal heads, camera resampling and CoreML are unqualified. |
+| F10 — Timing, gaps and combined validation | Development replay/scoring tooling implemented | Combined physical move/timing validation, threshold freezing and later original live automatic-decision audit. |
+| F15 — Recording screen | Functional browser recorder with rules, saving, review/undo, export and training | Physical workflow validation and Tauri/native integration. |
+
+The latest continuation used one coordinator with the inherited runtime model;
+no new helper agents were launched. Productive time/token totals and an independent
+review of this continuation are unavailable. Physical phases remain open.
+
 ## Next coordinator action
 
-Run `scripts/collect-board-readiness.sh local-data/board-readiness/session-001` with the populated board, then capture the scripted F02 moves, annotate separate development/validation sessions, and decide Phase 0 feasibility. Also test F01 packaged-app denial/recovery and interruption behavior. Those recordings then feed deterministic playback, real calibration overlays, and observation/model evaluation.
+Run `scripts/collect-board-readiness.sh local-data/board-readiness/session-001` with the populated board, then capture the scripted F02 moves, annotate separate development/validation sessions, and decide Phase 0 feasibility. Also test F01 packaged-app denial/recovery and interruption behavior. Those recordings can now feed the implemented [offline replay and scoring workflow](offline-evaluation.md). Keep complete training/development and validation sessions separate. Measure side-camera errors before changing or freezing recognition thresholds. Native CPU base-model parity is now checked. The next independent software milestone is desktop integration with explicit native acquisition clocks and bounded frame processing; physical side-camera validation/model selection remains pending.
 
 The 3 October Phase 1 completion reran formatting, the full offline workspace suite (**87 tests**), strict Clippy, the synthetic demo, and `git diff --check` with the project-local toolchain. The app bundle's code signature and granted camera-permission path also pass. Nokhwa's transitive `block 0.1.6` still emits a future-Rust incompatibility warning; keeping capture behind its adapter remains necessary.
 
@@ -209,3 +222,120 @@ proposal, rejected gap, stale commit and unchanged journal. The full Rust
 workspace suite, strict Clippy, formatting, all 23 JavaScript regressions and
 `git diff --check` pass with the local toolchain. Physical-board qualification
 remains the next gate; no side-view accuracy result was measured in this run.
+
+## 4 October — Recorded-media replay and blind decoder scoring
+
+Reviewed the current implementation and plan. Rules, journaled saving, review,
+undo, PGN, browser neural recognition and local piece-set adaptation already
+exist. The next missing preparation step was reproducible playback and scoring
+of annotated camera recordings; physical F02/side-camera accuracy and Rust model
+parity remain open.
+
+Added `scripts/prepare-evaluation.py`: Rust manifest validation, local source
+hash verification, bounded FFmpeg native-frame extraction, presentation-timeline
+checks, unchanged acquisition timestamps and staged publication of lossless
+hash-checked frames. The browser's new offline evaluation page imports those
+folders, overlays calibrated squares, inspects frames, replays the actual base
+neural graphs, measures motion, and exports complete raw observation traces. It
+never writes saved games or installs personal classifier heads.
+
+Added `observation-replay` and a strict trace/configuration contract. Rust decodes
+without reference moves, commits its own legal proposals including mistakes, and
+scores strict matching prefixes, incorrect/extra/missing moves, capture gaps and
+completion-interval containment/overlap. It preserves wrong branches rather than
+repairing them from annotations, reports null rates for empty denominators, and
+refuses qualification data. The report records full configuration and separates
+acquisition clocks from inference cost. This is development tooling, not the
+original-live-decision qualification audit.
+
+Validation: **108 Rust workspace tests**, strict offline Clippy, **28 JavaScript
+regressions**, **3 real FFmpeg preparation tests**, formatting and diff whitespace
+checks pass. New regressions cover native indexes, all corner orientations,
+source/frame hashes, timestamp corruption, inference backlogs, stream gaps,
+wrong legal histories, early commits, completion-interval comparisons, castling,
+en passant, all four promotions, and qualification rejection. FFmpeg-selected
+images match an independent full decode of a generated video byte for byte.
+
+In Chrome, a ten-frame recording of the licensed public still executed the real
+models and exported all ten observations. Cancellation disabled partial export;
+restarting completed replay, and Previous/Next inspection worked. Rust scoring
+retained capture times 0–900000 µs, emitted no moves or gaps and preserved the
+initial position. Precision/coverage were correctly null because this fixture
+contains no moves. Inference P95 was **203 ms** for this run; repeated scoring
+reports were byte-identical. This model-author fixture is a plumbing regression,
+not an independent physical side-camera accuracy result. Browser console checks
+were clean and the replay result was visually inspected.
+
+Automated folder selection is blocked by the Chrome extension's disabled file-URL
+permission; it was not changed. Browser automation also stalled intermittently.
+The test-only loopback server served a fixed public fixture through the same
+import/validation path. Download event observation timed out, so the complete
+export was verified through the app's inspect/copy control instead. Normal folder
+picker and download behavior still need a manual browser check. Test data and
+fixture routes are isolated from the main recorder; recorded camera directories
+are not exposed by the production server. HTTP checks confirmed the new page/assets return 200 while test-fixture and local recording paths return 404 on the main server. The updated recorder is running on localhost:8770 with its existing database. See [the workflow guide](offline-evaluation.md).
+
+F06/F10 tooling is now reviewable; their physical phase gates remain pending.
+Next: independent side-camera development/validation recordings and mapping/move
+measurements, then model/decoder selection and threshold freezing. Rust inference
+parity can proceed independently; Tauri packaging remains later work.
+
+## 4 October — Native CPU base-model inference and parity (F08 preparation)
+
+Continued the independent software milestone after offline replay/scoring.
+Added `crates/vision-inference`: native CPU graph execution through pinned
+`ort` 2.0.0-rc.10, owned/bounded RGBA frames, image-order geometry and all four
+algebraic orientations, exact crop/padding/mirroring/normalization, graph feature
+validation, production occupancy-based piece selection, normalized contract
+square evidence and the existing side-view quality diagnostics. Inference cost
+is reported separately; native callers must supply acquisition timestamps.
+The current live browser recorder continues to use its browser worker.
+
+Pinned the official Microsoft ONNX Runtime 1.23.2 macOS arm64 release archive,
+library and license hashes in `models/native-runtime.json`. The dedicated
+installer extracts only verified named files. The Rust adapter verifies the
+library and both existing derived-model hashes before loading. Automatic binary
+downloads at Rust build time are disabled. Runtime/model assets remain local and
+ignored; licensing/provenance notices were extended. No other platform, CoreML
+provider or native personal-head execution is qualified.
+
+Added `vision-infer` and `vision-preprocess` CLIs plus the reproducible
+`scripts/check-native-vision.py` reference checker. JavaScriptCore runs the actual
+`vision-core.js` on the same decoded RGBA bytes; SHA-256 comparisons cover every
+RGB crop and NCHW f32 tensor. ONNX 1.19.1's independent ReferenceEvaluator with
+NumPy 2.0.2 checks native logits, 1024-dimensional features, probabilities, top
+classes, square evidence/visibility, occupancy selection and tail batches.
+Calibration JSON parsing uses exact float round trips; a high-precision case
+checks that port boundary. All thresholds/tolerances are recorded rather than
+chosen after observing failures.
+
+Validation: **116 Rust workspace tests**, strict offline workspace Clippy,
+formatting, Python script compilation, runtime asset verification and diff
+whitespace checks pass. Eight new Rust regressions cover malformed frames and
+corners, orientation/reflection, padding/coverage, normalization/layout, class
+mapping/weak visibility, invalid probabilities/logits, calibration float parsing,
+and changed/truncated assets. The reference check passes **nine cases**: four
+rotations, skew, precise calibration, image-edge crops, shallow geometry and the
+licensed public photo. The current report is
+`local-data/vision/native-parity-003/report.json`; intermediate checks and artifacts
+are ignored local development evidence. Crops/tensors/coverage/geometry/quality
+match exactly. Maximum observed numerical errors and photo inference cost are
+recorded in that report; accepted bounds are 0.0001 absolute/relative for
+logits/features and 0.00001 absolute for probabilities/evidence.
+
+The public model-author photo still matches **64/64** labeled squares in normal
+selected-crop inference. Synthetic cases and this corpus fixture establish code
+and graph consistency, not independent side-camera accuracy. JPEG/ICC/Canvas
+scaling and native camera resampling are outside the already-decoded RGBA parity
+boundary. Browser WASM logits were not individually compared in this checkpoint;
+its existing execution/fixture smoke check remains separate evidence. The new
+native adapter does not yet drive a native live camera, game session or desktop
+window. See [the native recognition guide](native-vision.md).
+
+F08 base-model CPU parity tooling is ready for desktop integration. Phase 2 still
+requires supported-board development/validation recordings, observation/model
+comparison and a provisional pipeline decision. Next independent software work:
+connect native capture and inference with explicit acquisition clocks, bounded
+frame handling and interruption states, then expose the recorder in the Tauri
+shell. No physical phase gate was marked passed and no new helper agents were
+launched. Productive time and aggregate token totals remain unavailable.

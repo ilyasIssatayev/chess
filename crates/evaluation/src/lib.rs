@@ -12,6 +12,7 @@ use std::fs;
 use std::path::Path;
 
 pub const SCHEMA_VERSION: u32 = 1;
+pub mod replay;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
